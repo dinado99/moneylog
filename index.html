@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoneyLog</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri@2.39.3/dist/galmuri.css">
+<style>
+  /* 차분한 스타듀밸리 톤: 양피지 + 나무 + 채도 낮은 포인트 */
+  :root {
+    --paper: #f4ecd8;
+    --paper-dark: #e8dcbf;
+    --wood: #9c7b5b;
+    --wood-dark: #6e5440;
+    --wood-light: #c2a481;
+    --ink: #4a3b2e;
+    --ink-soft: #7d6b58;
+    --income: #6f8a5c;
+    --expense: #a86a52;
+    --gold: #b8954a;
+    --bg: #d9cdb4;
+    --px: 'Galmuri11', 'Galmuri9', ui-monospace, 'Apple SD Gothic Neo', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    background-image:
+      linear-gradient(45deg, rgba(0,0,0,.025) 25%, transparent 25%, transparent 75%, rgba(0,0,0,.025) 75%),
+      linear-gradient(45deg, rgba(0,0,0,.025) 25%, transparent 25%, transparent 75%, rgba(0,0,0,.025) 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 8px 8px;
+    color: var(--ink);
+    font-family: var(--px);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: none;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 48px; }
+
+  /* 픽셀 테두리 패널 */
+  .panel {
+    background: var(--paper);
+    border: 4px solid var(--wood-dark);
+    box-shadow:
+      inset 0 0 0 3px var(--wood-light),
+      inset 0 0 0 6px var(--paper-dark),
+      4px 4px 0 rgba(74,59,46,.25);
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  .panel h2 {
+    margin: 0 0 12px;
+    font-size: 14px;
+    color: var(--wood-dark);
+    letter-spacing: .5px;
+  }
+
+  /* 헤더 */
+  header.top {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: var(--wood);
+    border: 4px solid var(--wood-dark);
+    box-shadow: inset 0 3px 0 var(--wood-light), inset 0 -3px 0 #5a4535, 4px 4px 0 rgba(74,59,46,.25);
+    color: var(--paper);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+  }
+  header.top h1 { margin: 0; font-size: 20px; text-shadow: 2px 2px 0 var(--wood-dark); }
+  header.top .date {
+    background: var(--paper); color: var(--ink);
+    border: 3px solid var(--wood-dark);
+    padding: 4px 10px; font-size: 12px; white-space: nowrap;
+  }
+
+  /* 월 이동 */
+  .month-nav { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 14px; }
+  .month-nav .label { font-size: 16px; min-width: 120px; text-align: center; }
+
+  /* 버튼 */
+  button, .btn {
+    font-family: inherit; font-size: 13px; color: var(--ink);
+    background: var(--paper-dark);
+    border: 3px solid var(--wood-dark);
+    box-shadow: inset -2px -2px 0 var(--wood-light), inset 2px 2px 0 #fff8e6;
+    padding: 6px 12px; cursor: pointer;
+  }
+  button:hover { background: #efe3c6; }
+  button:active { box-shadow: inset 2px 2px 0 var(--wood-light); transform: translateY(1px); }
+  button.primary { background: var(--wood); color: var(--paper); box-shadow: inset -2px -2px 0 var(--wood-dark), inset 2px 2px 0 var(--wood-light); }
+  button.primary:hover { background: #a88766; }
+  button.icon { padding: 2px 8px; }
+
+  /* 요약 */
+  .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .stat { background: var(--paper-dark); border: 3px solid var(--wood-light); padding: 10px; text-align: center; }
+  .stat .k { font-size: 12px; color: var(--ink-soft); }
+  .stat .v { font-size: 16px; margin-top: 4px; word-break: break-all; }
+  .income { color: var(--income); }
+  .expense { color: var(--expense); }
+  .coin {
+    display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px;
+    background: var(--gold);
+    box-shadow: inset -2px -2px 0 #957636, inset 2px 2px 0 #d9bd7a;
+  }
+
+  /* 예산 = 에너지 바 */
+  .budget { margin-top: 14px; }
+  .budget-row { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink-soft); }
+  .energy {
+    flex: 1; height: 18px; background: #5a4535; border: 3px solid var(--wood-dark); position: relative;
+  }
+  .energy > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--income); transition: width .3s steps(8); }
+  .energy.warn > i { background: var(--gold); }
+  .energy.over > i { background: var(--expense); }
+  .link { background: none; border: none; box-shadow: none; padding: 0; color: var(--wood-dark); text-decoration: underline; font-size: 12px; }
+
+  /* 입력 폼 */
+  form.entry { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  form.entry .full { grid-column: 1 / -1; }
+  .seg { display: flex; }
+  .seg button { flex: 1; }
+  .seg button + button { border-left: none; }
+  .seg button.on.in { background: var(--income); color: var(--paper); }
+  .seg button.on.out { background: var(--expense); color: var(--paper); }
+  label { font-size: 12px; color: var(--ink-soft); display: block; margin-bottom: 4px; }
+  input, select {
+    width: 100%; font-family: inherit; font-size: 14px; color: var(--ink);
+    background: #fffaf0; border: 3px solid var(--wood-light);
+    padding: 6px 8px; border-radius: 0; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--wood); }
+  .form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* 카테고리 막대 */
+  .cats { display: flex; flex-direction: column; gap: 8px; }
+  .cat { display: grid; grid-template-columns: 90px 1fr 84px; gap: 10px; align-items: center; font-size: 12px; }
+  .cat > span:last-child { text-align: right; }
+  .bar { height: 12px; background: var(--paper-dark); border: 2px solid var(--wood-light); }
+  .bar > i { display: block; height: 100%; background: var(--wood-light); }
+  .empty { color: var(--ink-soft); font-size: 12px; text-align: center; padding: 10px 0; }
+
+  /* 내역 */
+  .day { margin-bottom: 12px; }
+  .day-head {
+    display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-soft);
+    border-bottom: 2px dashed var(--wood-light); padding-bottom: 4px; margin-bottom: 6px;
+  }
+  .item { display: flex; align-items: center; gap: 10px; padding: 6px 4px; }
+  .item:hover { background: var(--paper-dark); }
+  .item .tag {
+    font-size: 11px; padding: 1px 6px; border: 2px solid var(--wood-light); background: #fffaf0; white-space: nowrap;
+  }
+  .item .memo { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .amt { white-space: nowrap; }
+  .item .acts { display: flex; gap: 4px; opacity: .55; }
+  .item:hover .acts { opacity: 1; }
+
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  footer { text-align: center; font-size: 11px; color: var(--ink-soft); margin-top: 8px; }
+
+  @media (max-width: 520px) {
+    header.top h1 { font-size: 16px; }
+    .summary { grid-template-columns: 1fr; }
+    form.entry { grid-template-columns: 1fr; }
+    .cat { grid-template-columns: 70px 1fr 76px; }
+    .cat > span:last-child { text-align: right; }
+    .item .acts { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>MoneyLog</h1>
+    <div class="date" id="today"></div>
+  </header>
+
+  <div class="month-nav">
+    <button class="icon" id="prev" aria-label="이전 달">◀</button>
+    <div class="label" id="monthLabel"></div>
+    <button class="icon" id="next" aria-label="다음 달">▶</button>
+  </div>
+
+  <section class="panel">
+    <h2>이번 달 장부</h2>
+    <div class="summary">
+      <div class="stat"><div class="k">수입</div><div class="v income" id="sumIn"></div></div>
+      <div class="stat"><div class="k">지출</div><div class="v expense" id="sumOut"></div></div>
+      <div class="stat"><div class="k">남은 골드</div><div class="v" id="sumBal"></div></div>
+    </div>
+    <div class="budget">
+      <div class="budget-row">
+        <span>예산</span>
+        <div class="energy" id="energy"><i></i></div>
+        <span id="budgetText"></span>
+      </div>
+      <div style="text-align:right;margin-top:6px"><button class="link" id="setBudget">예산 설정</button></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2 id="formTitle">기록하기</h2>
+    <form class="entry" id="form" autocomplete="off">
+      <div class="full seg" id="typeSeg">
+        <button type="button" data-type="out" class="out on">지출</button>
+        <button type="button" data-type="in" class="in">수입</button>
+      </div>
+      <div>
+        <label for="amount">금액</label>
+        <input id="amount" inputmode="numeric" placeholder="0" required>
+      </div>
+      <div>
+        <label for="date">날짜</label>
+        <input id="date" type="date" required>
+      </div>
+      <div>
+        <label for="category">분류</label>
+        <select id="category"></select>
+      </div>
+      <div>
+        <label for="memo">메모</label>
+        <input id="memo" maxlength="60" placeholder="예) 피에르 상점">
+      </div>
+      <div class="full form-actions">
+        <button type="button" id="cancelEdit" hidden>취소</button>
+        <button type="submit" class="primary" id="submitBtn">장부에 적기</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>어디에 썼을까</h2>
+    <div class="cats" id="cats"></div>
+  </section>
+
+  <section class="panel">
+    <h2>내역</h2>
+    <div id="list"></div>
+  </section>
+
+  <div class="tools">
+    <button id="exportBtn">백업 저장</button>
+    <button id="importBtn">백업 불러오기</button>
+    <input type="file" id="importFile" accept="application/json" hidden>
+  </div>
+  <footer>데이터는 이 브라우저에만 저장돼요</footer>
+</div>
+
+<script>
+(() => {
+  const KEY = 'moneylog:v1';
+  const CATS = {
+    out: ['식비', '카페·간식', '장보기', '교통', '주거·공과금', '쇼핑', '문화·여가', '건강', '선물', '기타'],
+    in:  ['월급', '부수입', '용돈', '환급', '기타'],
+  };
+  const SEASONS = ['겨울', '겨울', '봄', '봄', '봄', '여름', '여름', '여름', '가을', '가을', '가을', '겨울'];
+  const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
+
+  const $ = (id) => document.getElementById(id);
+  const won = (n) => n.toLocaleString('ko-KR') + 'G';
+  const pad = (n) => String(n).padStart(2, '0');
+  const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+  let state = load();
+  let view = new Date(); view.setDate(1);
+  let type = 'out';
+  let editingId = null;
+
+  function load() {
+    try {
+      const s = JSON.parse(localStorage.getItem(KEY));
+      if (s && Array.isArray(s.entries)) return { entries: s.entries, budgets: s.budgets || {} };
+    } catch (e) {}
+    return { entries: [], budgets: {} };
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+  }
+  const monthKey = () => `${view.getFullYear()}-${pad(view.getMonth() + 1)}`;
+
+  function setType(t) {
+    type = t;
+    for (const b of $('typeSeg').children) b.classList.toggle('on', b.dataset.type === t);
+    $('category').innerHTML = CATS[t].map((c) => `<option>${c}</option>`).join('');
+  }
+
+  function resetForm() {
+    editingId = null;
+    $('form').reset();
+    setType(type);
+    const now = new Date();
+    const inView = now.getFullYear() === view.getFullYear() && now.getMonth() === view.getMonth();
+    $('date').value = inView ? ymd(now) : `${monthKey()}-01`;
+    $('formTitle').textContent = '기록하기';
+    $('submitBtn').textContent = '장부에 적기';
+    $('cancelEdit').hidden = true;
+  }
+
+  function render() {
+    const mk = monthKey();
+    $('monthLabel').textContent = `${view.getFullYear()}년 ${view.getMonth() + 1}월`;
+    const items = state.entries.filter((e) => e.date.startsWith(mk));
+    const sumIn = items.filter((e) => e.type === 'in').reduce((a, e) => a + e.amount, 0);
+    const sumOut = items.filter((e) => e.type === 'out').reduce((a, e) => a + e.amount, 0);
+    $('sumIn').innerHTML = `<span class="coin"></span>${won(sumIn)}`;
+    $('sumOut').innerHTML = `<span class="coin"></span>${won(sumOut)}`;
+    $('sumBal').innerHTML = `<span class="coin"></span>${won(sumIn - sumOut)}`;
+
+    // 예산 에너지 바: 남은 예산만큼 차 있음
+    const budget = state.budgets[mk];
+    const energy = $('energy');
+    if (budget) {
+      const left = budget - sumOut;
+      const ratio = Math.max(0, left / budget);
+      energy.firstElementChild.style.width = (ratio * 100) + '%';
+      energy.className = 'energy' + (left < 0 ? ' over' : ratio < 0.25 ? ' warn' : '');
+      $('budgetText').textContent = left >= 0 ? `${won(left)} 남음` : `${won(-left)} 초과`;
+    } else {
+      energy.firstElementChild.style.width = '0';
+      energy.className = 'energy';
+      $('budgetText').textContent = '미설정';
+    }
+
+    // 분류별 지출
+    const byCat = {};
+    items.filter((e) => e.type === 'out').forEach((e) => { byCat[e.category] = (byCat[e.category] || 0) + e.amount; });
+    const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+    const max = cats.length ? cats[0][1] : 1;
+    $('cats').innerHTML = cats.length
+      ? cats.map(([c, v]) => `
+          <div class="cat"><span>${esc(c)}</span>
+          <div class="bar"><i style="width:${(v / max) * 100}%"></i></div>
+          <span>${won(v)}</span></div>`).join('')
+      : '<div class="empty">아직 지출이 없어요</div>';
+
+    // 날짜별 내역
+    const byDay = {};
+    items.forEach((e) => (byDay[e.date] = byDay[e.date] || []).push(e));
+    const days = Object.keys(byDay).sort().reverse();
+    $('list').innerHTML = days.length ? days.map((d) => {
+      const list = byDay[d].sort((a, b) => b.created - a.created);
+      const net = list.reduce((a, e) => a + (e.type === 'in' ? e.amount : -e.amount), 0);
+      const dt = new Date(d + 'T00:00');
+      return `<div class="day">
+        <div class="day-head"><span>${dt.getMonth() + 1}월 ${dt.getDate()}일 (${WEEK[dt.getDay()]})</span>
+        <span class="${net >= 0 ? 'income' : 'expense'}">${net >= 0 ? '+' : '-'}${won(Math.abs(net))}</span></div>
+        ${list.map((e) => `
+          <div class="item">
+            <span class="tag">${esc(e.category)}</span>
+            <span class="memo">${esc(e.memo || '')}</span>
+            <span class="amt ${e.type === 'in' ? 'income' : 'expense'}">${e.type === 'in' ? '+' : '-'}${won(e.amount)}</span>
+            <span class="acts">
+              <button class="icon" data-edit="${e.id}" aria-label="수정">✎</button>
+              <button class="icon" data-del="${e.id}" aria-label="삭제">✕</button>
+            </span>
+          </div>`).join('')}
+      </div>`;
+    }).join('') : '<div class="empty">이 달의 기록이 없어요. 첫 기록을 남겨볼까요?</div>';
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function parseAmount(v) {
+    const n = parseInt(String(v).replace(/[^\d]/g, ''), 10);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  // 이벤트
+  $('typeSeg').addEventListener('click', (ev) => {
+    const t = ev.target.dataset.type;
+    if (t) setType(t);
+  });
+
+  $('amount').addEventListener('input', (ev) => {
+    const n = parseAmount(ev.target.value);
+    ev.target.value = n ? n.toLocaleString('ko-KR') : '';
+  });
+
+  $('form').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const amount = parseAmount($('amount').value);
+    if (!amount) { $('amount').focus(); return; }
+    const data = {
+      type, amount,
+      category: $('category').value,
+      memo: $('memo').value.trim(),
+      date: $('date').value,
+    };
+    if (editingId) {
+      Object.assign(state.entries.find((e) => e.id === editingId), data);
+    } else {
+      state.entries.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), created: Date.now(), ...data });
+    }
+    // 다른 달 날짜로 적었으면 그 달로 이동
+    const d = new Date(data.date + 'T00:00');
+    view = new Date(d.getFullYear(), d.getMonth(), 1);
+    save(); resetForm(); render();
+  });
+
+  $('cancelEdit').addEventListener('click', resetForm);
+
+  $('list').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('button');
+    if (!btn) return;
+    if (btn.dataset.del) {
+      if (!confirm('이 기록을 지울까요?')) return;
+      state.entries = state.entries.filter((e) => e.id !== btn.dataset.del);
+      save(); render();
+    } else if (btn.dataset.edit) {
+      const e = state.entries.find((x) => x.id === btn.dataset.edit);
+      editingId = e.id;
+      setType(e.type);
+      $('amount').value = e.amount.toLocaleString('ko-KR');
+      $('category').value = e.category;
+      $('memo').value = e.memo || '';
+      $('date').value = e.date;
+      $('formTitle').textContent = '기록 고치기';
+      $('submitBtn').textContent = '고치기';
+      $('cancelEdit').hidden = false;
+      $('form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
+
+  $('prev').addEventListener('click', () => { view.setMonth(view.getMonth() - 1); resetForm(); render(); });
+  $('next').addEventListener('click', () => { view.setMonth(view.getMonth() + 1); resetForm(); render(); });
+
+  $('setBudget').addEventListener('click', () => {
+    const mk = monthKey();
+    const cur = state.budgets[mk] || '';
+    const v = prompt(`${view.getMonth() + 1}월 예산 (비우면 해제)`, cur);
+    if (v === null) return;
+    const n = parseAmount(v);
+    if (n) state.budgets[mk] = n; else delete state.budgets[mk];
+    save(); render();
+  });
+
+  $('exportBtn').addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `moneylog-${ymd(new Date())}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  $('importBtn').addEventListener('click', () => $('importFile').click());
+  $('importFile').addEventListener('change', async (ev) => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    try {
+      const s = JSON.parse(await file.text());
+      if (!Array.isArray(s.entries)) throw new Error();
+      if (!confirm(`기록 ${s.entries.length}개를 불러올까요? 지금 데이터는 덮어써져요.`)) return;
+      state = { entries: s.entries, budgets: s.budgets || {} };
+      save(); render();
+    } catch (e) {
+      alert('백업 파일을 읽을 수 없어요.');
+    } finally {
+      ev.target.value = '';
+    }
+  });
+
+  // 오늘 날짜: 스타듀 달력 느낌으로
+  const now = new Date();
+  $('today').textContent = `${SEASONS[now.getMonth()]} ${now.getDate()}일 (${WEEK[now.getDay()]})`;
+
+  setType('out');
+  resetForm();
+  render();
+})();
+</script>
+</body>
+</html>
