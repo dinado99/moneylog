@@ -35,7 +35,11 @@ export const INCOME_CATEGORIES: Category[] = [
   { name: "기타수입", color: "#8A94A6" },
 ];
 
-export const TRANSFER_CATEGORIES: Category[] = [{ name: "이체", color: "#8A94A6" }];
+export const TRANSFER_CATEGORIES: Category[] = [
+  { name: "이체", color: "#8A94A6" },
+  { name: "카드대금", color: "#7C8798" },
+  { name: "내계좌이체", color: "#9AA3B2" },
+];
 
 export const ALL_CATEGORY_NAMES = [
   ...EXPENSE_CATEGORIES,

@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "머니로그",
-  description: "캡처와 엑셀로 채우는 가계부",
+  description: "뱅크샐러드 내역으로 채우는 가계부",
   appleWebApp: { capable: true, title: "머니로그", statusBarStyle: "default" },
 };
 

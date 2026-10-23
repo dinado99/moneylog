@@ -2,15 +2,15 @@
 
 개인용 가계부. 모바일 웹(홈 화면에 추가해서 앱처럼)으로 쓰는 걸 기준으로 만들었다.
 
-- **캡처로 가져오기** — 뱅크샐러드 가계부 화면 캡처를 올리면 Claude가 거래를 날짜·분류·결제수단별로 나눠서 채워준다.
-- **엑셀/CSV로 가져오기** — 뱅크샐러드 내보내기 엑셀(`가계부 내역` 시트), 카드사·은행 CSV(EUC-KR 포함)를 헤더 이름으로 자동 인식.
+- **엑셀/CSV로 가져오기** — 뱅크샐러드 내보내기 엑셀(`가계부 내역` 시트), 카드사·은행 CSV(EUC-KR 포함)를 헤더 이름으로 자동 인식해서 날짜·시간·분류·결제수단별로 나눠 넣는다.
+- **표 붙여넣기** — 엑셀에서 제목 줄까지 복사해 붙여넣어도 같은 방식으로 읽는다.
 - 저장 전 확인 화면에서 항목 수정/제외 가능, 이미 있는 내역(같은 날짜·시간·금액·내용)은 자동으로 빠진다.
 - 월별 지출/수입, 분류별 비중, 일별 내역, 검색, 직접 입력.
 
 ## 데이터 저장
 
 내역은 **Supabase**(Postgres)에 저장되고, 이메일+비밀번호로 로그인한다. RLS로 본인 내역만 읽고 쓸 수 있다.
-캡처 분석 API(`/api/parse-image`)도 로그인한 사용자의 Supabase 토큰을 확인한 뒤에만 Claude API를 호출한다.
+유료 API는 쓰지 않는다 (Supabase 무료 플랜으로 충분).
 설정 탭에서 JSON 백업/복원 가능.
 
 ## Supabase 설정
@@ -27,7 +27,7 @@
 
 ```bash
 npm install
-cp .env.example .env.local   # Supabase URL/키, ANTHROPIC_API_KEY 입력
+cp .env.example .env.local   # Supabase URL/키 입력
 npm run dev
 ```
 
@@ -43,7 +43,6 @@ npm run dev
 Vercel 등 Next.js가 돌아가는 곳이면 된다. 환경 변수:
 
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `ANTHROPIC_API_KEY` — 캡처 분석용
 
 배포 후 휴대폰 브라우저에서 열고 "홈 화면에 추가"하면 앱처럼 쓸 수 있다.
 
@@ -54,7 +53,6 @@ supabase/migrations/                         테이블·RLS 정의
 src/
   app/
     page.tsx, history/, import/, settings/   화면 라우트 (로그인 전에는 로그인 화면)
-    api/parse-image/route.ts                 캡처 → 거래 추출 (Claude API, structured output)
   components/
     screens/                                 화면별 클라이언트 컴포넌트
     txn-sheet.tsx                            거래 입력/수정 바텀시트
@@ -63,6 +61,5 @@ src/
     db.ts                                    transactions 테이블 읽기/쓰기, 중복 판별 hash
     categories.ts                            분류 목록·색상, 가맹점 이름 기반 분류 추측
     import/table.ts                          표 데이터 → 거래 (헤더 자동 인식)
-    import/file.ts                           xlsx/csv 파일 읽기
-    import/image.ts                          긴 캡처를 겹치게 잘라 JPEG로 변환
+    import/file.ts                           xlsx/csv 파일·붙여넣은 표 읽기
 ```

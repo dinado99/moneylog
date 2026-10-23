@@ -124,7 +124,7 @@ function EmptyState() {
         href="/import"
         className="mt-3 inline-flex h-10 items-center rounded-full bg-accent-soft px-4 text-[14px] font-semibold text-accent"
       >
-        캡처나 엑셀로 가져오기
+        뱅크샐러드 내역 가져오기
       </Link>
     </div>
   );

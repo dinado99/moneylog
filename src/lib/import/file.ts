@@ -1,6 +1,6 @@
 import { parseTable, type Cell, type TableParseResult } from "./table";
 
-function parseCsv(text: string): Cell[][] {
+export function parseDelimited(text: string): Cell[][] {
   const rows: Cell[][] = [];
   let row: string[] = [];
   let cell = "";
@@ -45,10 +45,17 @@ function decodeText(buf: ArrayBuffer): string {
 
 export class ImportError extends Error {}
 
+/** 엑셀/구글시트에서 복사한 표(탭 구분)나 CSV 텍스트 */
+export function parsePastedText(text: string): TableParseResult {
+  const result = parseTable(parseDelimited(text.trim()));
+  if (!result) throw new ImportError("첫 줄에 날짜·금액 같은 제목 줄이 있어야 해요.");
+  return result;
+}
+
 export async function parseSpreadsheetFile(file: File): Promise<TableParseResult> {
   const name = file.name.toLowerCase();
   if (name.endsWith(".csv") || name.endsWith(".tsv") || name.endsWith(".txt")) {
-    const result = parseTable(parseCsv(decodeText(await file.arrayBuffer())));
+    const result = parseTable(parseDelimited(decodeText(await file.arrayBuffer())));
     if (!result) throw new ImportError("날짜와 금액 컬럼을 찾지 못했어요.");
     return result;
   }

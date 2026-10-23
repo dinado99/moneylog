@@ -2,15 +2,12 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, FileSpreadsheet, Images, LoaderCircle } from "lucide-react";
+import { Check, ClipboardPaste, FileSpreadsheet, LoaderCircle } from "lucide-react";
 import { addMany, existingHashes, txnHash } from "@/lib/db";
-import { formatNumber, todayString } from "@/lib/format";
-import { ImportError, parseSpreadsheetFile } from "@/lib/import/file";
-import { screenshotToTiles } from "@/lib/import/image";
-import type { ImageParseRequest, ImageParseResult } from "@/lib/import/image-schema";
-import { supabase } from "@/lib/supabase";
+import { formatNumber } from "@/lib/format";
+import { ImportError, parsePastedText, parseSpreadsheetFile } from "@/lib/import/file";
 import type { TxnDraft, TxnSource } from "@/lib/types";
-import { useMonth } from "../app-shell";
+import { Sheet } from "../sheet";
 import { TxnRow } from "../txn-row";
 import { TxnSheet } from "../txn-sheet";
 import { Button, Card, PageHeader } from "../ui";
@@ -25,7 +22,7 @@ interface Item {
 type State =
   | { step: "pick"; error?: string }
   | { step: "working"; label: string }
-  | { step: "review"; source: TxnSource; items: Item[]; note?: string; skipped: number };
+  | { step: "review"; source: TxnSource; items: Item[]; skipped: number };
 
 async function buildItems(drafts: TxnDraft[]): Promise<Item[]> {
   const existing = await existingHashes(drafts);
@@ -41,61 +38,32 @@ async function buildItems(drafts: TxnDraft[]): Promise<Item[]> {
 
 export function ImportScreen() {
   const router = useRouter();
-  const { month } = useMonth();
   const [state, setState] = useState<State>({ step: "pick" });
   const [editingKey, setEditingKey] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  const imageInput = useRef<HTMLInputElement>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
-  async function handleImages(files: FileList | null) {
-    if (!files?.length) return;
-    setState({ step: "working", label: "캡처를 읽고 있어요" });
+  async function load(parse: () => Promise<{ rows: TxnDraft[]; skipped: number }>, fallbackError: string) {
+    setState({ step: "working", label: "내역을 정리하고 있어요" });
     try {
-      const screens = await Promise.all([...files].map(screenshotToTiles));
-      const body: ImageParseRequest = { screens, month, today: todayString() };
-      const { data } = await supabase().auth.getSession();
-      const res = await fetch("/api/parse-image", {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${data.session?.access_token ?? ""}` },
-        body: JSON.stringify(body),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new ImportError(json?.error ?? "분석에 실패했어요.");
-      const result = json as ImageParseResult;
-      const drafts: TxnDraft[] = result.transactions.map((t) => ({
-        date: t.date,
-        time: t.time ?? undefined,
-        type: t.type,
-        amount: Math.abs(t.amount),
-        merchant: t.merchant,
-        category: t.category,
-        method: t.method ?? undefined,
-      }));
-      setState({
-        step: "review",
-        source: "image",
-        items: await buildItems(drafts),
-        note: result.note ?? undefined,
-        skipped: 0,
-      });
-    } catch (e) {
-      console.error(e);
-      setState({ step: "pick", error: e instanceof ImportError ? e.message : "캡처를 처리하지 못했어요." });
-    }
-  }
-
-  async function handleFile(file: File | undefined) {
-    if (!file) return;
-    setState({ step: "working", label: "파일을 정리하고 있어요" });
-    try {
-      const { rows, skipped } = await parseSpreadsheetFile(file);
+      const { rows, skipped } = await parse();
       setState({ step: "review", source: "excel", items: await buildItems(rows), skipped });
     } catch (e) {
       console.error(e);
-      setState({ step: "pick", error: e instanceof ImportError ? e.message : "파일을 읽지 못했어요." });
+      setState({ step: "pick", error: e instanceof ImportError ? e.message : fallbackError });
     }
   }
+
+  const handleFile = (file: File | undefined) =>
+    file && load(() => parseSpreadsheetFile(file), "파일을 읽지 못했어요.");
+
+  const handlePaste = () => {
+    setPasteOpen(false);
+    load(async () => parsePastedText(pasteText), "붙여넣은 내용을 읽지 못했어요.");
+    setPasteText("");
+  };
 
   if (state.step === "working") {
     return (
@@ -130,7 +98,6 @@ export function ImportScreen() {
             {dupCount > 0 && ` 이미 있는 ${dupCount}건은 빼뒀어요.`}
             {state.skipped > 0 && ` 날짜·금액을 못 읽은 ${state.skipped}줄은 건너뛰었어요.`}
           </p>
-          {state.note && <p className="mt-1">{state.note}</p>}
           <p className="mt-1">항목을 누르면 고칠 수 있어요.</p>
         </div>
 
@@ -228,37 +195,40 @@ export function ImportScreen() {
 
       <div className="space-y-3">
         <ImportOption
-          icon={<Images size={22} />}
-          title="캡처로 가져오기"
-          desc="뱅크샐러드 가계부 화면을 캡처해서 올려 주세요. 여러 장도 한 번에 돼요."
-          onClick={() => imageInput.current?.click()}
-        />
-        <ImportOption
           icon={<FileSpreadsheet size={22} />}
-          title="엑셀 · CSV로 가져오기"
+          title="엑셀 · CSV 파일"
           desc="뱅크샐러드에서 내보낸 엑셀(.xlsx)이나 카드사·은행 내역(.csv)을 올려 주세요."
           onClick={() => fileInput.current?.click()}
+        />
+        <ImportOption
+          icon={<ClipboardPaste size={22} />}
+          title="표 붙여넣기"
+          desc="엑셀에서 제목 줄까지 복사해서 그대로 붙여넣어 주세요."
+          onClick={() => setPasteOpen(true)}
         />
       </div>
 
       <div className="mx-5 mt-6 space-y-2 text-[13px] leading-relaxed text-ink-3">
         <p>· 날짜·분류·결제수단은 자동으로 나눠 넣어요. 저장 전에 한 번 확인할 수 있어요.</p>
         <p>· 이미 저장된 내역과 같은 건 자동으로 빼둬요.</p>
-        <p>· 캡처에 연·월이 안 보이면 지금 보고 있는 달로 넣어요.</p>
         <p>· 뱅크샐러드 엑셀은 앱의 설정 › 데이터 내보내기에서 받을 수 있어요.</p>
       </div>
 
-      <input
-        ref={imageInput}
-        type="file"
-        accept="image/*"
-        multiple
-        hidden
-        onChange={(e) => {
-          handleImages(e.target.files);
-          e.target.value = "";
-        }}
-      />
+      <Sheet open={pasteOpen} onClose={() => setPasteOpen(false)}>
+        <div className="px-5 pb-5">
+          <p className="text-[17px] font-semibold">표 붙여넣기</p>
+          <textarea
+            autoFocus
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            placeholder={"날짜\t시간\t타입\t대분류\t…\n2026-10-22\t18:29\t지출\t카페/간식\t…"}
+            className="mt-4 h-56 w-full resize-none rounded-2xl bg-surface-2 p-4 text-[14px] leading-relaxed outline-none placeholder:text-ink-3"
+          />
+          <Button className="mt-4 w-full" disabled={!pasteText.trim()} onClick={handlePaste}>
+            읽어오기
+          </Button>
+        </div>
+      </Sheet>
       <input
         ref={fileInput}
         type="file"

@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { House, ListOrdered, ScanLine, Settings } from "lucide-react";
+import { House, ListOrdered, Import, Settings } from "lucide-react";
 
 const TABS = [
   { href: "/", label: "홈", icon: House },
   { href: "/history", label: "내역", icon: ListOrdered },
-  { href: "/import", label: "가져오기", icon: ScanLine },
+  { href: "/import", label: "가져오기", icon: Import },
   { href: "/settings", label: "설정", icon: Settings },
 ] as const;
 

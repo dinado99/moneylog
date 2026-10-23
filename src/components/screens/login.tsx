@@ -40,7 +40,7 @@ export function LoginScreen() {
       <div className="flex flex-1 flex-col justify-center">
         <p className="text-[26px] font-bold leading-snug">
           머니로그
-          <span className="block text-[16px] font-medium text-ink-3">캡처와 엑셀로 채우는 가계부</span>
+          <span className="block text-[16px] font-medium text-ink-3">뱅크샐러드 내역으로 채우는 가계부</span>
         </p>
 
         <form onSubmit={submit} className="mt-10 space-y-3">
