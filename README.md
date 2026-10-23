@@ -27,7 +27,7 @@
 
 ```bash
 npm install
-cp .env.example .env.local   # Supabase URL/키 입력
+
 npm run dev
 ```
 
@@ -40,9 +40,8 @@ npm run dev
 
 ## 배포
 
-Vercel 등 Next.js가 돌아가는 곳이면 된다. 환경 변수:
-
-- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+Vercel 등 Next.js가 돌아가는 곳이면 된다. Supabase URL과 anon 키는 `src/lib/supabase.ts`에 기본값으로 들어 있어서
+환경 변수 없이 배포해도 된다. 다른 프로젝트를 쓰려면 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`로 덮어쓴다.
 
 배포 후 휴대폰 브라우저에서 열고 "홈 화면에 추가"하면 앱처럼 쓸 수 있다.
 
