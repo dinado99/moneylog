@@ -62,3 +62,7 @@ src/
     import/table.ts                          표 데이터 → 거래 (헤더 자동 인식)
     import/file.ts                           xlsx/csv 파일·붙여넣은 표 읽기
 ```
+
+## 크레딧
+
+앱 아이콘: [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) (Microsoft, MIT License — `public/licenses/fluentui-emoji.txt`)
