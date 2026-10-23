@@ -1,10 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState } from "react";
 import useSWR from "swr";
 import { ChevronRight } from "lucide-react";
 import { allTxns, countTxns, deleteAllTxns, restoreTxns } from "@/lib/db";
 import { formatNumber, todayString } from "@/lib/format";
+import { remapAll } from "@/lib/remap";
+import { loadSettings } from "@/lib/settings-db";
 import { supabase } from "@/lib/supabase";
 import type { Txn } from "@/lib/types";
 import { useSession } from "../app-shell";
@@ -52,6 +55,12 @@ export function SettingsScreen() {
       return `${formatNumber(added)}건을 복원했어요.${txns.length > added ? ` (이미 있는 ${formatNumber(txns.length - added)}건 제외)` : ""}`;
     });
 
+  const remap = () =>
+    attempt(async () => {
+      const n = await remapAll(await loadSettings());
+      return n ? `${formatNumber(n)}건의 분류·결제수단을 정리했어요.` : "바꿀 내역이 없어요.";
+    });
+
   const wipe = () => {
     if (!confirm("모든 내역을 삭제할까요? 되돌릴 수 없어요.")) return;
     attempt(async () => {
@@ -66,6 +75,13 @@ export function SettingsScreen() {
       {message && <p className="mx-4 mb-3 rounded-2xl bg-surface px-4 py-3 text-[14px] text-ink-2">{message}</p>}
 
       <Card className="overflow-hidden">
+        <LinkRow href="/settings/expense" label="지출 분류" first />
+        <LinkRow href="/settings/income" label="수입 분류" />
+        <LinkRow href="/settings/assets" label="자산" />
+        <Row label="저장된 내역 분류 다시 맞추기" onClick={remap} />
+      </Card>
+
+      <Card className="mt-3 overflow-hidden">
         <div className="px-5 pt-5 pb-3">
           <p className="text-[13px] text-ink-3">저장된 내역</p>
           <p className="num mt-1 text-[22px] font-bold">{count === undefined ? "–" : `${formatNumber(count)}건`}</p>
@@ -108,5 +124,17 @@ function Row({ label, onClick, danger }: { label: string; onClick: () => void; d
       {label}
       <ChevronRight size={18} className="text-ink-3" />
     </button>
+  );
+}
+
+function LinkRow({ href, label, first }: { href: string; label: string; first?: boolean }) {
+  return (
+    <Link
+      href={href}
+      className={`flex h-14 w-full items-center justify-between px-5 text-[15px] active:bg-surface-2 ${first ? "" : "border-t border-line"}`}
+    >
+      {label}
+      <ChevronRight size={18} className="text-ink-3" />
+    </Link>
   );
 }

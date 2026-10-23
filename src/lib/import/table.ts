@@ -1,4 +1,4 @@
-import { ALL_CATEGORY_NAMES, defaultCategory, guessExpenseCategory } from "../categories";
+import { guessExpenseCategory } from "../categories";
 import type { TxnDraft, TxnType } from "../types";
 
 export type Cell = string | number | boolean | Date | null | undefined;
@@ -123,14 +123,10 @@ function parseType(v: Cell): TxnType | null {
   return null;
 }
 
-function normalizeCategory(raw: string, type: TxnType, merchant: string): string {
-  if (!raw || raw === "미분류") {
-    return (type === "expense" && guessExpenseCategory(merchant)) || defaultCategory(type);
-  }
-  if (ALL_CATEGORY_NAMES.includes(raw)) return raw;
-  const compact = raw.replace(/\s/g, "");
-  const hit = ALL_CATEGORY_NAMES.find((c) => c.replace(/\s/g, "") === compact);
-  return hit ?? raw;
+/** 원본 분류 이름을 그대로 두고(사용자 분류로 바꾸는 건 map.ts), 비어 있으면 가맹점으로 추측한다. */
+function rawCategory(raw: string, type: TxnType, merchant: string): string {
+  if (raw && raw !== "미분류") return raw;
+  return (type === "expense" && guessExpenseCategory(merchant)) || "";
 }
 
 export interface TableParseResult {
@@ -206,7 +202,7 @@ export function parseTable(table: Cell[][], fallbackYear = new Date().getFullYea
       type,
       amount,
       merchant,
-      category: normalizeCategory(str(get(row, "category")), type, merchant),
+      category: rawCategory(str(get(row, "category")), type, merchant),
       subcategory: subcategory && subcategory !== "미분류" ? subcategory : undefined,
       method: str(get(row, "method")) || undefined,
       memo: memo !== merchant ? memo : undefined,

@@ -1,70 +1,14 @@
-import type { TxnType } from "./types";
+// 이체는 사용자 분류와 별개로 고정 목록을 쓴다 (지출 합계에서 빠짐)
+export const TRANSFER_CATEGORIES = ["이체", "카드대금", "내계좌이체"];
 
-export interface Category {
-  name: string;
-  color: string;
-}
-
-export const EXPENSE_CATEGORIES: Category[] = [
-  { name: "식비", color: "#F08C4A" },
-  { name: "카페/간식", color: "#B98A64" },
-  { name: "술/유흥", color: "#9C6ADE" },
-  { name: "생활", color: "#46A97A" },
-  { name: "온라인쇼핑", color: "#4C7DF0" },
-  { name: "패션/쇼핑", color: "#E0648D" },
-  { name: "뷰티/미용", color: "#D57AC0" },
-  { name: "교통", color: "#2FA6B5" },
-  { name: "자동차", color: "#5E6FC2" },
-  { name: "주거/통신", color: "#7C8798" },
-  { name: "의료/건강", color: "#DB5A5E" },
-  { name: "금융", color: "#68707D" },
-  { name: "문화/여가", color: "#E3A33B" },
-  { name: "여행/숙박", color: "#22A094" },
-  { name: "교육/학습", color: "#7A6AD0" },
-  { name: "자녀/육아", color: "#E9B23F" },
-  { name: "반려동물", color: "#9C7A5E" },
-  { name: "경조/선물", color: "#D9576F" },
-  { name: "미분류", color: "#A3A9B3" },
+// 분류 순서대로 돌려 쓰는 색 (통계 막대, 아이콘 배경)
+const PALETTE = [
+  "#F08C4A", "#4C7DF0", "#46A97A", "#E0648D", "#9C6ADE", "#2FA6B5", "#E3A33B", "#DB5A5E",
+  "#5E6FC2", "#B98A64", "#22A094", "#D57AC0", "#7A6AD0", "#68707D", "#E9B23F", "#7C8798",
 ];
 
-export const INCOME_CATEGORIES: Category[] = [
-  { name: "급여", color: "#3E6FE8" },
-  { name: "용돈", color: "#5B8DEF" },
-  { name: "금융수입", color: "#2F9E8F" },
-  { name: "사업수입", color: "#6B6FD6" },
-  { name: "기타수입", color: "#8A94A6" },
-];
-
-export const TRANSFER_CATEGORIES: Category[] = [
-  { name: "이체", color: "#8A94A6" },
-  { name: "카드대금", color: "#7C8798" },
-  { name: "내계좌이체", color: "#9AA3B2" },
-];
-
-export const ALL_CATEGORY_NAMES = [
-  ...EXPENSE_CATEGORIES,
-  ...INCOME_CATEGORIES,
-  ...TRANSFER_CATEGORIES,
-].map((c) => c.name);
-
-const colorMap = new Map(
-  [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES, ...TRANSFER_CATEGORIES].map((c) => [c.name, c.color]),
-);
-
-export function categoryColor(name: string): string {
-  return colorMap.get(name) ?? "#A3A9B3";
-}
-
-export function categoriesFor(type: TxnType): Category[] {
-  if (type === "income") return INCOME_CATEGORIES;
-  if (type === "transfer") return TRANSFER_CATEGORIES;
-  return EXPENSE_CATEGORIES;
-}
-
-export function defaultCategory(type: TxnType): string {
-  if (type === "income") return "기타수입";
-  if (type === "transfer") return "이체";
-  return "미분류";
+export function paletteColor(index: number): string {
+  return index < 0 ? "#A3A9B3" : PALETTE[index % PALETTE.length];
 }
 
 const MERCHANT_RULES: [RegExp, string][] = [
@@ -80,7 +24,7 @@ const MERCHANT_RULES: [RegExp, string][] = [
   [/올리브영|미용실|헤어|네일/i, "뷰티/미용"],
 ];
 
-/** 분류가 없을 때 가맹점 이름으로 지출 분류를 추측한다. */
+/** 분류가 없을 때 가맹점 이름으로 (뱅크샐러드식) 지출 분류를 추측한다. */
 export function guessExpenseCategory(merchant: string): string | null {
   for (const [re, name] of MERCHANT_RULES) if (re.test(merchant)) return name;
   return null;

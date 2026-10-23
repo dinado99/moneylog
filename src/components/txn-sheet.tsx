@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { categoriesFor, defaultCategory } from "@/lib/categories";
+import { TRANSFER_CATEGORIES } from "@/lib/categories";
+import { mainCategories, useSettings, type Settings } from "@/lib/settings-db";
 import { formatNumber, todayString } from "@/lib/format";
 import type { TxnDraft, TxnType } from "@/lib/types";
 import { Sheet } from "./sheet";
@@ -14,7 +15,19 @@ const TYPE_OPTIONS: { value: TxnType; label: string }[] = [
 ];
 
 function emptyDraft(): TxnDraft {
-  return { date: todayString(), type: "expense", amount: 0, category: "미분류", merchant: "" };
+  return { date: todayString(), type: "expense", amount: 0, category: "", merchant: "" };
+}
+
+interface Choice {
+  name: string;
+  emoji?: string | null;
+  subs: string[];
+}
+
+function choicesFor(s: Settings | undefined, type: TxnDraft["type"]): Choice[] {
+  if (type === "transfer") return TRANSFER_CATEGORIES.map((name) => ({ name, subs: [] }));
+  if (!s) return [];
+  return mainCategories(s, type).map((m) => ({ name: m.name, emoji: m.emoji, subs: m.subs.map((c) => c.name) }));
 }
 
 interface Props {
@@ -41,8 +54,10 @@ function TxnForm({ initial, onClose, onSave, onDelete, saveLabel = "저장" }: P
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof TxnDraft>(k: K, v: TxnDraft[K]) => setD((prev) => ({ ...prev, [k]: v }));
 
-  const categories = categoriesFor(d.type);
-  const valid = d.amount > 0 && d.merchant.trim() !== "" && /^\d{4}-\d{2}-\d{2}$/.test(d.date);
+  const { data: settings } = useSettings();
+  const categories = choicesFor(settings, d.type);
+  const current = categories.find((c) => c.name === d.category);
+  const valid = d.amount > 0 && d.merchant.trim() !== "" && d.category !== "" && /^\d{4}-\d{2}-\d{2}$/.test(d.date);
 
   async function submit() {
     if (!valid) return;
@@ -68,11 +83,10 @@ function TxnForm({ initial, onClose, onSave, onDelete, saveLabel = "저장" }: P
         value={d.type}
         options={TYPE_OPTIONS}
         onChange={(type) =>
-          setD((prev) => ({
-            ...prev,
-            type,
-            category: categoriesFor(type).some((c) => c.name === prev.category) ? prev.category : defaultCategory(type),
-          }))
+          setD((prev) => {
+            const keep = choicesFor(settings, type).some((c) => c.name === prev.category);
+            return { ...prev, type, category: keep ? prev.category : "", subcategory: keep ? prev.subcategory : undefined };
+          })
         }
       />
 
@@ -104,20 +118,31 @@ function TxnForm({ initial, onClose, onSave, onDelete, saveLabel = "저장" }: P
         <span className="text-[13px] text-ink-3">분류</span>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {categories.map((c) => (
-            <button
+            <Chip
               key={c.name}
-              onClick={() => set("category", c.name)}
-              className={`h-8 rounded-full px-3 text-[14px] transition ${
-                d.category === c.name ? "bg-ink text-surface" : "bg-surface-2 text-ink-2"
-              }`}
+              active={d.category === c.name}
+              onClick={() => setD((prev) => ({ ...prev, category: c.name, subcategory: undefined }))}
             >
+              {c.emoji && <span className="mr-1">{c.emoji}</span>}
               {c.name}
-            </button>
+            </Chip>
           ))}
-          {!categories.some((c) => c.name === d.category) && (
-            <span className="h-8 rounded-full bg-ink px-3 text-[14px] leading-8 text-surface">{d.category}</span>
-          )}
+          {d.category && !current && <Chip active>{d.category}</Chip>}
         </div>
+        {current && current.subs.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5 rounded-2xl bg-surface-2 p-2">
+            {current.subs.map((sub) => (
+              <Chip
+                key={sub}
+                small
+                active={d.subcategory === sub}
+                onClick={() => set("subcategory", d.subcategory === sub ? undefined : sub)}
+              >
+                {sub}
+              </Chip>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -140,12 +165,26 @@ function TxnForm({ initial, onClose, onSave, onDelete, saveLabel = "저장" }: P
       </div>
 
       <Field label="결제수단">
-        <input
+        <select
           value={d.method ?? ""}
-          placeholder="선택"
           onChange={(e) => set("method", e.target.value || undefined)}
-          className="w-full bg-transparent outline-none placeholder:text-ink-3"
-        />
+          className={`w-full appearance-none bg-transparent outline-none ${d.method ? "" : "text-ink-3"}`}
+        >
+          <option value="">선택 안 함</option>
+          {settings?.groups.map((g) => {
+            const assets = settings.assets.filter((a) => a.group_id === g.id);
+            return assets.length ? (
+              <optgroup key={g.id} label={`${g.emoji ?? ""} ${g.name}`.trim()}>
+                {assets.map((a) => (
+                  <option key={a.id} value={a.name}>
+                    {a.name}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null;
+          })}
+          {d.method && !settings?.assets.some((a) => a.name === d.method) && <option value={d.method}>{d.method}</option>}
+        </select>
       </Field>
       <Field label="메모">
         <input
@@ -172,6 +211,30 @@ function TxnForm({ initial, onClose, onSave, onDelete, saveLabel = "저장" }: P
         </Button>
       </div>
     </div>
+  );
+}
+
+function Chip({
+  active,
+  small,
+  onClick,
+  children,
+}: {
+  active?: boolean;
+  small?: boolean;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-3 transition ${small ? "h-7 text-[13px]" : "h-8 text-[14px]"} ${
+        active ? "bg-ink text-surface" : small ? "bg-surface text-ink-2" : "bg-surface-2 text-ink-2"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

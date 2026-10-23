@@ -6,6 +6,8 @@ import { Check, ClipboardPaste, FileSpreadsheet, LoaderCircle } from "lucide-rea
 import { addMany, existingHashes, txnHash } from "@/lib/db";
 import { formatNumber } from "@/lib/format";
 import { ImportError, parsePastedText, parseSpreadsheetFile } from "@/lib/import/file";
+import { mapDraft } from "@/lib/import/map";
+import { ensureAssets, loadSettings } from "@/lib/settings-db";
 import type { TxnDraft, TxnSource } from "@/lib/types";
 import { Sheet } from "../sheet";
 import { TxnRow } from "../txn-row";
@@ -48,8 +50,9 @@ export function ImportScreen() {
   async function load(parse: () => Promise<{ rows: TxnDraft[]; skipped: number }>, fallbackError: string) {
     setState({ step: "working", label: "내역을 정리하고 있어요" });
     try {
-      const { rows, skipped } = await parse();
-      setState({ step: "review", source: "excel", items: await buildItems(rows), skipped });
+      const [{ rows, skipped }, settings] = await Promise.all([parse(), loadSettings()]);
+      const mapped = rows.map((d) => mapDraft(settings, d));
+      setState({ step: "review", source: "excel", items: await buildItems(mapped), skipped });
     } catch (e) {
       console.error(e);
       setState({ step: "pick", error: e instanceof ImportError ? e.message : fallbackError });
@@ -153,10 +156,10 @@ export function ImportScreen() {
             onClick={async () => {
               setSaving(true);
               try {
-                await addMany(
-                  selected.map((i) => i.draft),
-                  state.source,
-                );
+                const drafts = selected.map((i) => i.draft);
+                await addMany(drafts, state.source);
+                // 처음 보는 결제수단은 자산에 자동으로 추가
+                await ensureAssets(await loadSettings(), drafts.map((d) => d.method ?? "")).catch(console.error);
                 // 탭을 오가도 화면 상태가 유지되므로 다음 가져오기를 위해 처음으로 되돌린다
                 setState({ step: "pick" });
                 router.push("/history");

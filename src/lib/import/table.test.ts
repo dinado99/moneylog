@@ -54,7 +54,7 @@ describe("parseTable", () => {
     ])!;
     expect(result.rows).toEqual([
       expect.objectContaining({ date: "2026-10-01", time: "09:12", merchant: "월세", amount: 500000, type: "expense" }),
-      expect.objectContaining({ date: "2026-10-02", time: "10:00", merchant: "이자", amount: 1234, type: "income", category: "기타수입" }),
+      expect.objectContaining({ date: "2026-10-02", time: "10:00", merchant: "이자", amount: 1234, type: "income", category: "" }),
     ]);
   });
 });

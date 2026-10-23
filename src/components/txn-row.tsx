@@ -1,3 +1,5 @@
+"use client";
+
 import type { ReactNode } from "react";
 import { formatNumber } from "@/lib/format";
 import type { TxnDraft } from "@/lib/types";
@@ -29,7 +31,7 @@ export function TxnRow({
   return (
     <button onClick={onClick} className="flex w-full items-center gap-3 px-5 py-3 text-left active:bg-surface-2">
       {leading}
-      <CategoryBadge name={t.category} />
+      <CategoryBadge type={t.type} name={t.category} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[15px] font-medium">{t.merchant}</span>
         <span className="block truncate text-[13px] text-ink-3">{sub}</span>

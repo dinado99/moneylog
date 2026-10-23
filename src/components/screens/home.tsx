@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ChevronRight, Plus } from "lucide-react";
-import { categoryColor } from "@/lib/categories";
+import { useCategoryLook } from "@/lib/category-look";
 import { deleteTxn, saveTxn } from "@/lib/db";
 import { currentMonth, daysInMonth, formatNumber, formatWon, todayString } from "@/lib/format";
 import type { Txn } from "@/lib/types";
@@ -18,6 +18,7 @@ export function HomeScreen() {
   const { month } = useMonth();
   const { data: txns, error } = useMonthTxns(month);
   const [editing, setEditing] = useState<Txn | "new" | null>(null);
+  const look = useCategoryLook();
 
   const stats = useMemo(() => {
     const list = txns ?? [];
@@ -63,7 +64,7 @@ export function HomeScreen() {
             {stats.cats.map(([name, v]) => (
               <span
                 key={name}
-                style={{ width: `${(v / stats.expense) * 100}%`, background: categoryColor(name) }}
+                style={{ width: `${(v / stats.expense) * 100}%`, background: look("expense", name).color }}
                 className="h-full border-r-2 border-surface last:border-r-0"
               />
             ))}
@@ -71,8 +72,10 @@ export function HomeScreen() {
           <ul className="mt-4 space-y-3">
             {stats.cats.slice(0, 5).map(([name, v]) => (
               <li key={name} className="flex items-center gap-3 text-[15px]">
-                <span className="size-2 rounded-full" style={{ background: categoryColor(name) }} />
-                <span className="flex-1">{name}</span>
+                <span className="size-2 rounded-full" style={{ background: look("expense", name).color }} />
+                <span className="flex-1">
+                  {look("expense", name).emoji} {name}
+                </span>
                 <span className="num text-[13px] text-ink-3">{Math.round((v / stats.expense) * 100)}%</span>
                 <span className="num w-24 text-right font-medium">{formatNumber(v)}</span>
               </li>

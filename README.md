@@ -6,6 +6,8 @@
 - **표 붙여넣기** — 엑셀에서 제목 줄까지 복사해 붙여넣어도 같은 방식으로 읽는다.
 - 저장 전 확인 화면에서 항목 수정/제외 가능, 이미 있는 내역(같은 날짜·시간·금액·내용)은 자동으로 빠진다.
 - 월별 지출/수입, 분류별 비중, 일별 내역, 검색, 직접 입력.
+- 지출·수입 분류(대분류/소분류, 이모지)와 자산(그룹/계좌·카드) 관리. 뱅크샐러드 분류는 내 분류로 자동 변환되고,
+  처음 보는 결제수단은 자산에 자동 추가된다. 자산 이름을 바꾸면 예전 이름은 별칭으로 남아 다음 가져오기에도 인식된다.
 
 ## 데이터 저장
 
@@ -16,7 +18,7 @@
 ## Supabase 설정
 
 1. [supabase.com](https://supabase.com)에서 프로젝트 생성
-2. SQL Editor에서 `supabase/migrations/20261023000000_transactions.sql` 실행
+2. SQL Editor에서 `supabase/migrations/` 안의 SQL 파일을 이름 순서대로 실행
    (Supabase CLI를 쓴다면 `supabase link` 후 `supabase db push`)
 3. Project Settings › API에서 URL과 publishable key(구 anon key)를 환경 변수에 입력
 4. Authentication › URL Configuration의 Site URL을 배포 주소로 설정 (가입 인증 메일 링크용)
@@ -61,6 +63,8 @@ src/
     categories.ts                            분류 목록·색상, 가맹점 이름 기반 분류 추측
     import/table.ts                          표 데이터 → 거래 (헤더 자동 인식)
     import/file.ts                           xlsx/csv 파일·붙여넣은 표 읽기
+    import/map.ts                            뱅크샐러드 분류/결제수단 → 내 분류/자산
+    settings-db.ts, defaults.ts              분류·자산 테이블 읽기/쓰기, 처음 넣어 주는 기본값
 ```
 
 ## 크레딧
