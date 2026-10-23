@@ -38,6 +38,7 @@ export function TxnSheet(props: Props) {
 function TxnForm({ initial, onClose, onSave, onDelete, saveLabel = "저장" }: Props) {
   const [d, setD] = useState<TxnDraft>(() => initial ?? emptyDraft());
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof TxnDraft>(k: K, v: TxnDraft[K]) => setD((prev) => ({ ...prev, [k]: v }));
 
   const categories = categoriesFor(d.type);
@@ -45,10 +46,17 @@ function TxnForm({ initial, onClose, onSave, onDelete, saveLabel = "저장" }: P
 
   async function submit() {
     if (!valid) return;
+    await run(() => onSave({ ...d, merchant: d.merchant.trim(), memo: d.memo?.trim() || undefined }));
+  }
+
+  async function run(action: () => void | Promise<void>) {
     setBusy(true);
+    setError(null);
     try {
-      await onSave({ ...d, merchant: d.merchant.trim(), memo: d.memo?.trim() || undefined });
+      await action();
       onClose();
+    } catch {
+      setError("저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
       setBusy(false);
     }
@@ -148,15 +156,13 @@ function TxnForm({ initial, onClose, onSave, onDelete, saveLabel = "저장" }: P
         />
       </Field>
 
+      {error && <p className="mt-5 text-[14px] text-danger">{error}</p>}
       <div className="mt-7 flex gap-2">
         {onDelete && (
           <Button
             variant="danger"
             disabled={busy}
-            onClick={async () => {
-              await onDelete();
-              onClose();
-            }}
+            onClick={() => run(onDelete)}
           >
             삭제
           </Button>

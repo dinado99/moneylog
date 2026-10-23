@@ -56,3 +56,7 @@ export function Segmented<T extends string>({
     </div>
   );
 }
+
+export function LoadError() {
+  return <p className="py-16 text-center text-[15px] text-ink-3">내역을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.</p>;
+}

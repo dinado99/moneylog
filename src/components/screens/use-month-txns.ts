@@ -1,8 +1,8 @@
 "use client";
 
-import { useLiveQuery } from "dexie-react-hooks";
+import useSWR from "swr";
 import { monthTxns } from "@/lib/db";
 
 export function useMonthTxns(month: string) {
-  return useLiveQuery(() => monthTxns(month), [month]);
+  return useSWR(["txns", month], ([, m]) => monthTxns(m), { keepPreviousData: true });
 }

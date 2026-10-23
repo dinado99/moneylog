@@ -8,7 +8,7 @@ import { formatNumber, todayString } from "@/lib/format";
 import { ImportError, parseSpreadsheetFile } from "@/lib/import/file";
 import { screenshotToTiles } from "@/lib/import/image";
 import type { ImageParseRequest, ImageParseResult } from "@/lib/import/image-schema";
-import { getPasscode } from "@/lib/passcode";
+import { supabase } from "@/lib/supabase";
 import type { TxnDraft, TxnSource } from "@/lib/types";
 import { useMonth } from "../app-shell";
 import { TxnRow } from "../txn-row";
@@ -28,7 +28,7 @@ type State =
   | { step: "review"; source: TxnSource; items: Item[]; note?: string; skipped: number };
 
 async function buildItems(drafts: TxnDraft[]): Promise<Item[]> {
-  const existing = await existingHashes(drafts.map(txnHash));
+  const existing = await existingHashes(drafts);
   const seen = new Set<string>();
   return drafts.map((draft, key) => {
     const h = txnHash(draft);
@@ -44,6 +44,7 @@ export function ImportScreen() {
   const { month } = useMonth();
   const [state, setState] = useState<State>({ step: "pick" });
   const [editingKey, setEditingKey] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
   const imageInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -53,9 +54,10 @@ export function ImportScreen() {
     try {
       const screens = await Promise.all([...files].map(screenshotToTiles));
       const body: ImageParseRequest = { screens, month, today: todayString() };
+      const { data } = await supabase().auth.getSession();
       const res = await fetch("/api/parse-image", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-app-passcode": getPasscode() },
+        headers: { "content-type": "application/json", authorization: `Bearer ${data.session?.access_token ?? ""}` },
         body: JSON.stringify(body),
       });
       const json = await res.json().catch(() => null);
@@ -78,6 +80,7 @@ export function ImportScreen() {
         skipped: 0,
       });
     } catch (e) {
+      console.error(e);
       setState({ step: "pick", error: e instanceof ImportError ? e.message : "캡처를 처리하지 못했어요." });
     }
   }
@@ -89,6 +92,7 @@ export function ImportScreen() {
       const { rows, skipped } = await parseSpreadsheetFile(file);
       setState({ step: "review", source: "excel", items: await buildItems(rows), skipped });
     } catch (e) {
+      console.error(e);
       setState({ step: "pick", error: e instanceof ImportError ? e.message : "파일을 읽지 못했어요." });
     }
   }
@@ -178,13 +182,22 @@ export function ImportScreen() {
         <div className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+56px)] z-20 mx-auto max-w-md bg-gradient-to-t from-bg via-bg to-transparent px-4 pt-6 pb-3">
           <Button
             className="w-full"
-            disabled={!selected.length}
+            disabled={!selected.length || saving}
             onClick={async () => {
-              await addMany(
-                selected.map((i) => i.draft),
-                state.source,
-              );
-              router.push("/history");
+              setSaving(true);
+              try {
+                await addMany(
+                  selected.map((i) => i.draft),
+                  state.source,
+                );
+                // 탭을 오가도 화면 상태가 유지되므로 다음 가져오기를 위해 처음으로 되돌린다
+                setState({ step: "pick" });
+                router.push("/history");
+              } catch {
+                alert("저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
+              } finally {
+                setSaving(false);
+              }
             }}
           >
             {selected.length}건 저장{total > 0 && ` · 지출 ${formatNumber(total)}원`}

@@ -11,12 +11,12 @@ import { useMonth } from "../app-shell";
 import { MonthSwitcher } from "../month-switcher";
 import { TxnRow } from "../txn-row";
 import { TxnSheet } from "../txn-sheet";
-import { Card, PageHeader } from "../ui";
+import { Card, LoadError, PageHeader } from "../ui";
 import { useMonthTxns } from "./use-month-txns";
 
 export function HomeScreen() {
   const { month } = useMonth();
-  const txns = useMonthTxns(month);
+  const { data: txns, error } = useMonthTxns(month);
   const [editing, setEditing] = useState<Txn | "new" | null>(null);
 
   const stats = useMemo(() => {
@@ -35,6 +35,7 @@ export function HomeScreen() {
     return { expense, income, cats, dailyAvg: expense / Math.max(1, elapsed) };
   }, [txns, month]);
 
+  if (error) return <LoadError />;
   if (!txns) return null;
   const recent = txns.slice(0, 5);
 

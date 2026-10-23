@@ -9,14 +9,25 @@
 
 ## 데이터 저장
 
-내역은 **브라우저(IndexedDB)에만** 저장된다. 서버에는 아무것도 남지 않고, 캡처 분석 때만 이미지가 Claude API로 전송된다.
-기기 변경 전에는 설정 › 백업 파일 내보내기로 JSON 백업.
+내역은 **Supabase**(Postgres)에 저장되고, 이메일+비밀번호로 로그인한다. RLS로 본인 내역만 읽고 쓸 수 있다.
+캡처 분석 API(`/api/parse-image`)도 로그인한 사용자의 Supabase 토큰을 확인한 뒤에만 Claude API를 호출한다.
+설정 탭에서 JSON 백업/복원 가능.
+
+## Supabase 설정
+
+1. [supabase.com](https://supabase.com)에서 프로젝트 생성
+2. SQL Editor에서 `supabase/migrations/20261023000000_transactions.sql` 실행
+   (Supabase CLI를 쓴다면 `supabase link` 후 `supabase db push`)
+3. Project Settings › API에서 URL과 publishable key(구 anon key)를 환경 변수에 입력
+4. Authentication › URL Configuration의 Site URL을 배포 주소로 설정 (가입 인증 메일 링크용)
+5. 앱에서 가입해서 계정을 만든 뒤, 혼자 쓸 거라면 Authentication › Sign In / Providers에서
+   **Allow new users to sign up** 을 꺼서 다른 사람이 가입하지 못하게 막기
 
 ## 개발
 
 ```bash
 npm install
-cp .env.example .env.local   # ANTHROPIC_API_KEY 입력
+cp .env.example .env.local   # Supabase URL/키, ANTHROPIC_API_KEY 입력
 npm run dev
 ```
 
@@ -31,23 +42,25 @@ npm run dev
 
 Vercel 등 Next.js가 돌아가는 곳이면 된다. 환경 변수:
 
-- `ANTHROPIC_API_KEY` — 캡처 분석용 (필수)
-- `APP_PASSCODE` — URL을 아는 누구나 API를 쓰지 못하게 막는 간단한 패스코드 (권장)
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `ANTHROPIC_API_KEY` — 캡처 분석용
 
 배포 후 휴대폰 브라우저에서 열고 "홈 화면에 추가"하면 앱처럼 쓸 수 있다.
 
 ## 구조
 
 ```
+supabase/migrations/                         테이블·RLS 정의
 src/
   app/
-    page.tsx, history/, import/, settings/   화면 라우트
+    page.tsx, history/, import/, settings/   화면 라우트 (로그인 전에는 로그인 화면)
     api/parse-image/route.ts                 캡처 → 거래 추출 (Claude API, structured output)
   components/
     screens/                                 화면별 클라이언트 컴포넌트
     txn-sheet.tsx                            거래 입력/수정 바텀시트
   lib/
-    db.ts                                    IndexedDB(Dexie), 중복 판별 hash
+    supabase.ts                              Supabase 클라이언트
+    db.ts                                    transactions 테이블 읽기/쓰기, 중복 판별 hash
     categories.ts                            분류 목록·색상, 가맹점 이름 기반 분류 추측
     import/table.ts                          표 데이터 → 거래 (헤더 자동 인식)
     import/file.ts                           xlsx/csv 파일 읽기

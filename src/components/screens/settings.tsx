@@ -1,48 +1,64 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { useLiveQuery } from "dexie-react-hooks";
+import useSWR from "swr";
 import { ChevronRight } from "lucide-react";
-import { db } from "@/lib/db";
+import { allTxns, countTxns, deleteAllTxns, restoreTxns } from "@/lib/db";
 import { formatNumber, todayString } from "@/lib/format";
-import { getPasscode, setPasscode } from "@/lib/passcode";
+import { supabase } from "@/lib/supabase";
 import type { Txn } from "@/lib/types";
+import { useSession } from "../app-shell";
 import { Card, PageHeader } from "../ui";
 
 export function SettingsScreen() {
-  const count = useLiveQuery(() => db.txns.count(), []);
-  const [code, setCode] = useState(getPasscode);
+  const session = useSession();
+  const { data: count } = useSWR(["txns", "count"], countTxns);
   const [message, setMessage] = useState<string | null>(null);
   const restoreInput = useRef<HTMLInputElement>(null);
 
-  async function exportBackup() {
-    const txns = await db.txns.toArray();
-    const blob = new Blob([JSON.stringify({ version: 1, txns }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `moneylog-${todayString()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function restore(file: File | undefined) {
-    if (!file) return;
+  async function attempt(action: () => Promise<string>) {
     try {
-      const data = JSON.parse(await file.text()) as { txns?: Txn[] };
-      if (!Array.isArray(data.txns)) throw new Error();
-      await db.txns.bulkPut(data.txns);
-      setMessage(`${formatNumber(data.txns.length)}건을 복원했어요.`);
+      setMessage(await action());
     } catch {
-      setMessage("백업 파일을 읽지 못했어요.");
+      setMessage("처리하지 못했어요. 잠시 후 다시 시도해 주세요.");
     }
   }
 
-  async function wipe() {
+  const exportBackup = () =>
+    attempt(async () => {
+      const txns = await allTxns();
+      const blob = new Blob([JSON.stringify({ version: 1, txns }, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `moneylog-${todayString()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return `${formatNumber(txns.length)}건을 내보냈어요.`;
+    });
+
+  const restore = (file: File | undefined) =>
+    file &&
+    attempt(async () => {
+      let txns: Txn[];
+      try {
+        const data = JSON.parse(await file.text()) as { txns?: Txn[] };
+        if (!Array.isArray(data.txns)) throw new Error();
+        txns = data.txns;
+      } catch {
+        return "백업 파일을 읽지 못했어요.";
+      }
+      const added = await restoreTxns(txns);
+      return `${formatNumber(added)}건을 복원했어요.${txns.length > added ? ` (이미 있는 ${formatNumber(txns.length - added)}건 제외)` : ""}`;
+    });
+
+  const wipe = () => {
     if (!confirm("모든 내역을 삭제할까요? 되돌릴 수 없어요.")) return;
-    await db.txns.clear();
-    setMessage("모든 내역을 삭제했어요.");
-  }
+    attempt(async () => {
+      await deleteAllTxns();
+      return "모든 내역을 삭제했어요.";
+    });
+  };
 
   return (
     <>
@@ -52,31 +68,19 @@ export function SettingsScreen() {
       <Card className="overflow-hidden">
         <div className="px-5 pt-5 pb-3">
           <p className="text-[13px] text-ink-3">저장된 내역</p>
-          <p className="num mt-1 text-[22px] font-bold">{formatNumber(count ?? 0)}건</p>
-          <p className="mt-2 text-[13px] leading-relaxed text-ink-3">
-            내역은 이 기기의 브라우저에만 저장돼요. 기기를 바꾸거나 브라우저 데이터를 지우기 전에 백업해 두세요.
-          </p>
+          <p className="num mt-1 text-[22px] font-bold">{count === undefined ? "–" : `${formatNumber(count)}건`}</p>
         </div>
         <Row label="백업 파일 내보내기" onClick={exportBackup} />
         <Row label="백업에서 복원" onClick={() => restoreInput.current?.click()} />
         <Row label="모든 내역 삭제" danger onClick={wipe} />
       </Card>
 
-      <Card className="mt-3 p-5">
-        <p className="text-[15px] font-semibold">캡처 분석 패스코드</p>
-        <p className="mt-1 text-[13px] leading-relaxed text-ink-3">
-          서버에 APP_PASSCODE를 설정했다면 같은 값을 입력하세요.
-        </p>
-        <input
-          type="password"
-          value={code}
-          onChange={(e) => {
-            setCode(e.target.value);
-            setPasscode(e.target.value);
-          }}
-          placeholder="패스코드"
-          className="mt-3 h-11 w-full rounded-xl bg-surface-2 px-4 outline-none placeholder:text-ink-3"
-        />
+      <Card className="mt-3 overflow-hidden">
+        <div className="px-5 pt-5 pb-3">
+          <p className="text-[13px] text-ink-3">계정</p>
+          <p className="mt-1 truncate text-[16px] font-medium">{session.user.email}</p>
+        </div>
+        <Row label="로그아웃" onClick={() => supabase().auth.signOut()} />
       </Card>
 
       <input

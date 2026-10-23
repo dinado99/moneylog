@@ -9,14 +9,14 @@ import { useMonth } from "../app-shell";
 import { MonthSwitcher } from "../month-switcher";
 import { TxnRow } from "../txn-row";
 import { TxnSheet } from "../txn-sheet";
-import { PageHeader, Segmented } from "../ui";
+import { LoadError, PageHeader, Segmented } from "../ui";
 import { useMonthTxns } from "./use-month-txns";
 
 type Filter = "all" | TxnType;
 
 export function HistoryScreen() {
   const { month } = useMonth();
-  const txns = useMonthTxns(month);
+  const { data: txns, error } = useMonthTxns(month);
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Txn | null>(null);
@@ -33,6 +33,7 @@ export function HistoryScreen() {
     return [...map.entries()];
   }, [txns, filter, query]);
 
+  if (error) return <LoadError />;
   if (!txns) return null;
 
   return (

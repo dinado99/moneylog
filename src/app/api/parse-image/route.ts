@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { createClient } from "@supabase/supabase-js";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/lib/categories";
 import { ImageParseSchema, type ImageParseRequest } from "@/lib/import/image-schema";
@@ -20,15 +21,23 @@ const SYSTEM_PROMPT = `너는 가계부 앱의 거래 추출기다. 사용자가
 - category는 화면에 표시된 분류를 우선하고, 없으면 가맹점 이름으로 가장 그럴듯한 것을 고른다. 지출 분류: ${EXPENSE_CATEGORIES.map((c) => c.name).join(", ")}. 수입 분류: ${INCOME_CATEGORIES.map((c) => c.name).join(", ")}. 이체는 "이체".
 - 글자가 잘리거나 흐려서 금액/날짜를 확신할 수 없는 행은 넣지 말고 note에 적는다.`;
 
+/** 로그인한 사용자만 API 키를 쓸 수 있게 Supabase 액세스 토큰을 검증한다. */
+async function isSignedIn(request: Request): Promise<boolean> {
+  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!token || !url || !key) return false;
+  const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await supabase.auth.getClaims(token);
+  return !error && Boolean(data?.claims.sub);
+}
+
 function bad(status: number, message: string) {
   return Response.json({ error: message }, { status });
 }
 
 export async function POST(request: Request) {
-  const passcode = process.env.APP_PASSCODE;
-  if (passcode && request.headers.get("x-app-passcode") !== passcode) {
-    return bad(401, "패스코드가 필요해요. 설정에서 입력해 주세요.");
-  }
+  if (!(await isSignedIn(request))) return bad(401, "다시 로그인해 주세요.");
 
   if (!process.env.ANTHROPIC_API_KEY) {
     return bad(500, "서버에 ANTHROPIC_API_KEY가 설정되지 않았어요.");
