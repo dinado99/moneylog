@@ -15,7 +15,7 @@ function defaultSettings(): Settings {
   return {
     categories,
     groups: [{ id: "g1", name: "신용카드", emoji: "💳", sort: 0 }],
-    assets: [{ id: "a1", group_id: "g1", name: "삼성SFC카드", aliases: ["신세계이마트 삼성카드 SFC 7"], sort: 0 }],
+    assets: [{ id: "a1", group_id: "g1", name: "삼성SFC카드", aliases: ["신세계이마트 삼성카드 SFC 7"], sort: 0, balance: null, balance_updated_at: null }],
   };
 }
 

@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { Check, ClipboardPaste, FileSpreadsheet, LoaderCircle } from "lucide-react";
 import { addMany, existingHashes, txnHash } from "@/lib/db";
 import { formatNumber } from "@/lib/format";
-import { ImportError, parsePastedText, parseSpreadsheetFile } from "@/lib/import/file";
+import type { AssetRow } from "@/lib/import/assets";
+import { ImportError, parsePastedText, parseSpreadsheetFile, type ImportResult } from "@/lib/import/file";
 import { mapDraft } from "@/lib/import/map";
-import { ensureAssets, loadSettings } from "@/lib/settings-db";
+import { applyAssetBalances, ensureAssets, findAsset, guessGroup, loadSettings, type Settings } from "@/lib/settings-db";
 import type { TxnDraft, TxnSource } from "@/lib/types";
 import { Sheet } from "../sheet";
 import { TxnRow } from "../txn-row";
@@ -24,7 +25,29 @@ interface Item {
 type State =
   | { step: "pick"; error?: string }
   | { step: "working"; label: string }
-  | { step: "review"; source: TxnSource; items: Item[]; skipped: number };
+  | {
+      step: "review";
+      source: TxnSource;
+      items: Item[];
+      skipped: number;
+      assets: AssetPlan[];
+      assetsOn: boolean;
+    };
+
+interface AssetPlan extends AssetRow {
+  /** 이미 있는 자산이면 그 이름 */
+  existing?: string;
+  group?: string;
+}
+
+function planAssets(s: Settings, rows: AssetRow[]): AssetPlan[] {
+  return rows.map((r) => {
+    const existing = findAsset(s, r.name);
+    const groupId = existing?.group_id ?? guessGroup(s, r.name, r.kind)?.id;
+    const g = s.groups.find((x) => x.id === groupId);
+    return { ...r, existing: existing?.name, group: g ? `${g.emoji ?? ""} ${g.name}`.trim() : undefined };
+  });
+}
 
 async function buildItems(drafts: TxnDraft[]): Promise<Item[]> {
   const existing = await existingHashes(drafts);
@@ -47,12 +70,19 @@ export function ImportScreen() {
   const [pasteText, setPasteText] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
-  async function load(parse: () => Promise<{ rows: TxnDraft[]; skipped: number }>, fallbackError: string) {
+  async function load(parse: () => Promise<ImportResult>, fallbackError: string) {
     setState({ step: "working", label: "내역을 정리하고 있어요" });
     try {
-      const [{ rows, skipped }, settings] = await Promise.all([parse(), loadSettings()]);
-      const mapped = rows.map((d) => mapDraft(settings, d));
-      setState({ step: "review", source: "excel", items: await buildItems(mapped), skipped });
+      const [{ txns, assets }, settings] = await Promise.all([parse(), loadSettings()]);
+      const mapped = txns.rows.map((d) => mapDraft(settings, d));
+      setState({
+        step: "review",
+        source: "excel",
+        items: await buildItems(mapped),
+        skipped: txns.skipped,
+        assets: planAssets(settings, assets),
+        assetsOn: assets.length > 0,
+      });
     } catch (e) {
       console.error(e);
       setState({ step: "pick", error: e instanceof ImportError ? e.message : fallbackError });
@@ -84,6 +114,7 @@ export function ImportScreen() {
     const total = selected.filter((i) => i.draft.type === "expense").reduce((s, i) => s + i.draft.amount, 0);
     const update = (fn: (items: Item[]) => Item[]) => setState({ ...state, items: fn(items) });
     const editing = items.find((i) => i.key === editingKey);
+    const assetCount = state.assetsOn ? state.assets.length : 0;
 
     return (
       <>
@@ -95,14 +126,49 @@ export function ImportScreen() {
             </button>
           }
         />
-        <div className="px-5 pb-4 text-[14px] leading-relaxed text-ink-3">
-          <p>
-            <span className="font-semibold text-ink">{items.length}건</span>을 찾았어요.
-            {dupCount > 0 && ` 이미 있는 ${dupCount}건은 빼뒀어요.`}
-            {state.skipped > 0 && ` 날짜·금액을 못 읽은 ${state.skipped}줄은 건너뛰었어요.`}
-          </p>
-          <p className="mt-1">항목을 누르면 고칠 수 있어요.</p>
-        </div>
+        {state.assets.length > 0 && (
+          <Card className="mb-3 py-2">
+            <div className="flex items-center justify-between px-5 py-2">
+              <div>
+                <p className="text-[16px] font-semibold">자산 잔액 {state.assets.length}개</p>
+                <p className="text-[13px] text-ink-3">있는 자산은 잔액만 바꾸고, 없는 건 새로 추가해요.</p>
+              </div>
+              <button
+                role="checkbox"
+                aria-checked={state.assetsOn}
+                aria-label="자산 잔액 반영"
+                onClick={() => setState({ ...state, assetsOn: !state.assetsOn })}
+                className={`grid size-6 shrink-0 place-items-center rounded-full border-2 transition ${
+                  state.assetsOn ? "border-ink bg-ink text-surface" : "border-line"
+                }`}
+              >
+                {state.assetsOn && <Check size={14} strokeWidth={3} />}
+              </button>
+            </div>
+            {state.assets.map((a, i) => (
+              <div key={i} className={`flex items-center gap-3 px-5 py-2.5 ${state.assetsOn ? "" : "opacity-40"}`}>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15px]">{a.existing ?? a.name}</span>
+                  <span className="block truncate text-[12px] text-ink-3">
+                    {a.existing ? "잔액 업데이트" : `새 자산 · ${a.group ?? ""}`}
+                  </span>
+                </span>
+                <span className="num shrink-0 text-[15px] font-medium">{formatNumber(a.balance)}원</span>
+              </div>
+            ))}
+          </Card>
+        )}
+
+        {(items.length > 0 || !state.assets.length) && (
+          <div className="px-5 pb-4 text-[14px] leading-relaxed text-ink-3">
+            <p>
+              <span className="font-semibold text-ink">{items.length}건</span>을 찾았어요.
+              {dupCount > 0 && ` 이미 있는 ${dupCount}건은 빼뒀어요.`}
+              {state.skipped > 0 && ` 날짜·금액을 못 읽은 ${state.skipped}줄은 건너뛰었어요.`}
+            </p>
+            {items.length > 0 && <p className="mt-1">항목을 누르면 고칠 수 있어요.</p>}
+          </div>
+        )}
 
         {items.length > 0 ? (
           <Card className="py-2">
@@ -146,23 +212,26 @@ export function ImportScreen() {
             ))}
           </Card>
         ) : (
-          <p className="py-12 text-center text-[15px] text-ink-3">가져올 내역이 없어요</p>
+          !state.assets.length && <p className="py-12 text-center text-[15px] text-ink-3">가져올 내역이 없어요</p>
         )}
 
         <div className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+56px)] z-20 mx-auto max-w-md bg-gradient-to-t from-bg via-bg to-transparent px-4 pt-6 pb-3">
           <Button
             className="w-full"
-            disabled={!selected.length || saving}
+            disabled={(!selected.length && !assetCount) || saving}
             onClick={async () => {
               setSaving(true);
               try {
+                if (assetCount) await applyAssetBalances(await loadSettings(), state.assets);
                 const drafts = selected.map((i) => i.draft);
-                await addMany(drafts, state.source);
-                // 처음 보는 결제수단은 자산에 자동으로 추가
-                await ensureAssets(await loadSettings(), drafts.map((d) => d.method ?? "")).catch(console.error);
+                if (drafts.length) {
+                  await addMany(drafts, state.source);
+                  // 처음 보는 결제수단은 자산에 자동으로 추가
+                  await ensureAssets(await loadSettings(), drafts.map((d) => d.method ?? "")).catch(console.error);
+                }
                 // 탭을 오가도 화면 상태가 유지되므로 다음 가져오기를 위해 처음으로 되돌린다
                 setState({ step: "pick" });
-                router.push("/history");
+                router.push(drafts.length ? "/history" : "/settings/assets");
               } catch {
                 alert("저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
               } finally {
@@ -170,7 +239,9 @@ export function ImportScreen() {
               }
             }}
           >
-            {selected.length}건 저장{total > 0 && ` · 지출 ${formatNumber(total)}원`}
+            {[selected.length > 0 && `${selected.length}건`, assetCount > 0 && `자산 ${assetCount}개`].filter(Boolean).join(" · ") ||
+              "0건"}{" "}
+            저장{total > 0 && ` · 지출 ${formatNumber(total)}원`}
           </Button>
         </div>
         <div className="h-20" />
@@ -200,13 +271,13 @@ export function ImportScreen() {
         <ImportOption
           icon={<FileSpreadsheet size={22} />}
           title="엑셀 · CSV 파일"
-          desc="뱅크샐러드에서 내보낸 엑셀(.xlsx)이나 카드사·은행 내역(.csv)을 올려 주세요."
+          desc="뱅크샐러드에서 내보낸 엑셀(.xlsx)이나 카드사·은행 내역(.csv)을 올려 주세요. 자산 잔액도 같이 읽어요."
           onClick={() => fileInput.current?.click()}
         />
         <ImportOption
           icon={<ClipboardPaste size={22} />}
           title="표 붙여넣기"
-          desc="엑셀에서 제목 줄까지 복사해서 그대로 붙여넣어 주세요."
+          desc="엑셀에서 제목 줄까지 복사해서 붙여넣어 주세요. 자산 현황(항목·상품명·금액) 표도 돼요."
           onClick={() => setPasteOpen(true)}
         />
       </div>

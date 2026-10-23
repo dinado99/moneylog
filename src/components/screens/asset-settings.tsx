@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Pencil, Plus } from "lucide-react";
+import { formatNumber } from "@/lib/format";
 import {
   addAsset,
   addGroup,
@@ -28,6 +29,8 @@ export function AssetSettingsScreen() {
 
   if (error) return <LoadError />;
   if (!settings) return null;
+  const sum = (list: Asset[]) => list.reduce((n, a) => n + (a.balance ?? 0), 0);
+  const updated = settings.assets.map((a) => a.balance_updated_at).filter(Boolean).sort().at(-1);
 
   return (
     <>
@@ -40,6 +43,15 @@ export function AssetSettingsScreen() {
           </button>
         }
       />
+      <div className="px-5 pt-2 pb-5">
+        <p className="text-[14px] text-ink-3">총 자산</p>
+        <p className="num mt-1 text-[30px] font-bold leading-tight">{formatNumber(sum(settings.assets))}원</p>
+        {updated && (
+          <p className="mt-1 text-[12px] text-ink-3">
+            잔액 기준 {new Date(updated).toLocaleDateString("ko-KR", { month: "long", day: "numeric" })}
+          </p>
+        )}
+      </div>
       <div className="space-y-3">
         {settings.groups.map((g) => {
           const assets = settings.assets.filter((a) => a.group_id === g.id);
@@ -48,6 +60,9 @@ export function AssetSettingsScreen() {
               <div className="flex items-center gap-2 px-5 pt-4 pb-2">
                 <span className="text-[18px]">{g.emoji}</span>
                 <span className="flex-1 text-[15px] font-semibold">{g.name}</span>
+                {assets.some((a) => a.balance !== null) && (
+                  <span className="num text-[14px] font-medium text-ink-2">{formatNumber(sum(assets))}원</span>
+                )}
                 <button
                   aria-label={`${g.name} 그룹 수정`}
                   onClick={() => setEditing({ kind: "group", group: g })}
@@ -62,8 +77,8 @@ export function AssetSettingsScreen() {
                   onClick={() => setEditing({ kind: "asset", asset: a, groupId: g.id })}
                   className="flex w-full items-center border-t border-line px-5 py-3.5 text-left text-[15px] active:bg-surface-2"
                 >
-                  <span className="flex-1 truncate">{a.name}</span>
-                  {a.aliases.length > 0 && <span className="ml-2 text-[12px] text-ink-3">별칭 {a.aliases.length}</span>}
+                  <span className="min-w-0 flex-1 truncate">{a.name}</span>
+                  {a.balance !== null && <span className="num ml-3 shrink-0 font-medium">{formatNumber(a.balance)}원</span>}
                 </button>
               ))}
               <button
@@ -183,6 +198,7 @@ function GroupForm({ settings, group, onClose }: { settings: Settings; group?: A
 function AssetForm({ settings, asset, groupId, onClose }: { settings: Settings; asset?: Asset; groupId: string; onClose: () => void }) {
   const [name, setName] = useState(asset?.name ?? "");
   const [group, setGroup] = useState(groupId);
+  const [balance, setBalance] = useState(asset?.balance ?? null);
   const { busy, error, run } = useRunner();
   const siblings = settings.assets.filter((a) => a.group_id === groupId);
   const index = asset ? siblings.findIndex((a) => a.id === asset.id) : -1;
@@ -204,6 +220,22 @@ function AssetForm({ settings, asset, groupId, onClose }: { settings: Settings; 
           </option>
         ))}
       </select>
+      <div className="mt-2 flex h-12 items-center rounded-2xl bg-surface-2 px-4">
+        <span className="shrink-0 text-[14px] text-ink-3">잔액</span>
+        <input
+          inputMode="numeric"
+          aria-label="잔액"
+          value={balance === null ? "" : `${balance < 0 ? "-" : ""}${formatNumber(Math.abs(balance))}`}
+          onChange={(e) => {
+            const v = e.target.value.trim();
+            const digits = v.replace(/\D/g, "").slice(0, 15);
+            setBalance(digits === "" ? null : Number(digits) * (v.startsWith("-") ? -1 : 1));
+          }}
+          placeholder="모름"
+          className="num min-w-0 flex-1 bg-transparent text-right outline-none placeholder:text-ink-3"
+        />
+        <span className="ml-1 text-ink-2">원</span>
+      </div>
       {asset && asset.aliases.length > 0 && (
         <p className="mt-3 text-[13px] leading-relaxed text-ink-3">가져오기 별칭: {asset.aliases.join(", ")}</p>
       )}
@@ -231,7 +263,13 @@ function AssetForm({ settings, asset, groupId, onClose }: { settings: Settings; 
           className="flex-1"
           disabled={!name.trim() || busy}
           onClick={() =>
-            run(() => (asset ? updateAsset(settings, asset, { name, groupId: group }) : addAsset(settings, group, name)), onClose)
+            run(
+              () =>
+                asset
+                  ? updateAsset(settings, asset, { name, groupId: group, balance })
+                  : addAsset(settings, group, name, balance),
+              onClose,
+            )
           }
         >
           {asset ? "저장" : "추가"}

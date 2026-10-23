@@ -24,6 +24,8 @@ export interface Asset {
   name: string;
   aliases: string[];
   sort: number;
+  balance: number | null;
+  balance_updated_at: string | null;
 }
 
 export interface MainCategory extends Category {
@@ -50,12 +52,12 @@ async function fetchSettings(): Promise<Settings> {
   const [categories, groups, assets] = await Promise.all([
     db.from("categories").select("id, type, parent_id, name, emoji, sort").then(check),
     db.from("asset_groups").select("id, name, emoji, sort").then(check),
-    db.from("assets").select("id, group_id, name, aliases, sort").then(check),
+    db.from("assets").select("id, group_id, name, aliases, sort, balance, balance_updated_at").then(check),
   ]);
   return {
     categories: (categories as Category[]).sort(bySort),
     groups: (groups as AssetGroup[]).sort(bySort),
-    assets: (assets as Asset[]).sort(bySort),
+    assets: (assets as Asset[]).map((a) => ({ ...a, balance: a.balance === null ? null : Number(a.balance) })).sort(bySort),
   };
 }
 
@@ -202,11 +204,16 @@ export async function deleteGroup(id: string) {
   await refreshSettings();
 }
 
-export async function addAsset(s: Settings, groupId: string, name: string) {
+export async function addAsset(s: Settings, groupId: string, name: string, balance: number | null = null) {
   check(
     await supabase()
       .from("assets")
-      .insert({ group_id: groupId, name: name.trim(), sort: nextSort(s.assets.filter((a) => a.group_id === groupId)) }),
+      .insert({
+        group_id: groupId,
+        name: name.trim(),
+        sort: nextSort(s.assets.filter((a) => a.group_id === groupId)),
+        ...balanceFields(balance),
+      }),
   );
   await refreshSettings();
 }
@@ -215,7 +222,15 @@ export async function addAsset(s: Settings, groupId: string, name: string) {
  * 이름을 바꾸면 예전 이름은 별칭으로 남겨서 다음 가져오기에서도 같은 자산으로 인식한다.
  * 이미 있는 다른 자산 이름으로 바꾸면 두 자산을 하나로 합친다.
  */
-export async function updateAsset(s: Settings, asset: Asset, patch: { name: string; groupId: string }) {
+function balanceFields(balance: number | null) {
+  return balance === null ? {} : { balance, balance_updated_at: new Date().toISOString() };
+}
+
+export async function updateAsset(
+  s: Settings,
+  asset: Asset,
+  patch: { name: string; groupId: string; balance?: number | null },
+) {
   const db = supabase();
   const name = patch.name.trim();
   const target = s.assets.find((a) => a.id !== asset.id && a.name === name);
@@ -223,11 +238,15 @@ export async function updateAsset(s: Settings, asset: Asset, patch: { name: stri
 
   if (target) {
     const aliases = [...new Set([...target.aliases, ...oldNames])].filter((n) => n !== target.name);
-    check(await db.from("assets").update({ aliases }).eq("id", target.id));
+    // 합칠 대상에 잔액이 없으면 이쪽 잔액을 가져간다
+    const balance = target.balance === null ? (patch.balance ?? asset.balance) : null;
+    check(await db.from("assets").update({ aliases, ...balanceFields(balance) }).eq("id", target.id));
     check(await db.from("assets").delete().eq("id", asset.id));
   } else {
     const aliases = name === asset.name ? asset.aliases : [...new Set([...asset.aliases, asset.name])].filter((n) => n !== name);
-    check(await db.from("assets").update({ name, group_id: patch.groupId, aliases }).eq("id", asset.id));
+    const balance = patch.balance !== undefined && patch.balance !== asset.balance ? balanceFields(patch.balance) : {};
+    const cleared = patch.balance === null && asset.balance !== null ? { balance: null, balance_updated_at: null } : {};
+    check(await db.from("assets").update({ name, group_id: patch.groupId, aliases, ...balance, ...cleared }).eq("id", asset.id));
   }
   if (name !== asset.name) {
     check(await db.from("transactions").update({ method: name }).eq("method", asset.name));
@@ -241,23 +260,59 @@ export async function deleteAsset(id: string) {
   await refreshSettings();
 }
 
+/** 자산 이름(과 뱅크샐러드 항목)으로 어느 그룹에 넣을지 추측한다. */
+export function guessGroup(s: Settings, name: string, kind = ""): AssetGroup | undefined {
+  const find = (re: RegExp) => s.groups.find((g) => re.test(g.name));
+  const text = `${kind} ${name}`;
+  return (
+    (/카드/.test(text) && find(/카드/)) ||
+    (/저축성|신탁|투자|연금|증권|적금|청약|세이프박스|저금통|펀드/.test(text) && find(/저축|투자/)) ||
+    (/입출금|현금|전자금융|페이|머니|포인트|통장|은행|뱅크/.test(text) && find(/현금|예금|통장/)) ||
+    find(/기타/) ||
+    s.groups[0]
+  );
+}
+
+export function findAsset(s: Settings, name: string): Asset | undefined {
+  return s.assets.find((a) => a.name === name || a.aliases.includes(name));
+}
+
 /** 가져온 결제수단 중 자산에 없는 것을 이름으로 그룹을 추측해 추가한다. */
 export async function ensureAssets(s: Settings, methods: string[]) {
-  const known = new Set(s.assets.flatMap((a) => [a.name, ...a.aliases]));
-  const missing = [...new Set(methods.filter((m) => m && !known.has(m)))];
+  const missing = [...new Set(methods.filter((m) => m && !findAsset(s, m)))];
   if (!missing.length || !s.groups.length) return;
-
-  const findGroup = (re: RegExp) => s.groups.find((g) => re.test(g.name));
-  const pick = (m: string) =>
-    (/카드/.test(m) && findGroup(/카드/)) ||
-    (/증권|적금|예금|청약|저금|세이프박스|펀드/.test(m) && findGroup(/저축|투자/)) ||
-    findGroup(/현금|예금|통장/) ||
-    s.groups[0];
-
   const rows = missing.map((name, i) => {
-    const g = pick(name);
+    const g = guessGroup(s, name)!;
     return { group_id: g.id, name, sort: nextSort(s.assets.filter((a) => a.group_id === g.id)) + i };
   });
   check(await supabase().from("assets").insert(rows));
+  await refreshSettings();
+}
+
+export interface AssetBalanceInput {
+  name: string;
+  kind?: string;
+  balance: number;
+}
+
+/** 자산 잔액을 반영한다. 이름(별칭 포함)이 같은 자산은 잔액만 바꾸고, 없으면 새로 만든다. */
+export async function applyAssetBalances(s: Settings, rows: AssetBalanceInput[]) {
+  const db = supabase();
+  const now = new Date().toISOString();
+  const inserts: Record<string, unknown>[] = [];
+  const nextByGroup = new Map<string, number>();
+  for (const r of rows) {
+    const existing = findAsset(s, r.name);
+    if (existing) {
+      check(await db.from("assets").update({ balance: r.balance, balance_updated_at: now }).eq("id", existing.id));
+      continue;
+    }
+    const g = guessGroup(s, r.name, r.kind);
+    if (!g) continue;
+    const sort = nextByGroup.get(g.id) ?? nextSort(s.assets.filter((a) => a.group_id === g.id));
+    nextByGroup.set(g.id, sort + 1);
+    inserts.push({ group_id: g.id, name: r.name, sort, balance: r.balance, balance_updated_at: now });
+  }
+  if (inserts.length) check(await db.from("assets").insert(inserts));
   await refreshSettings();
 }
