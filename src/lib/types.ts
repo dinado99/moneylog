@@ -16,12 +16,11 @@ export interface RecordDraft {
   outAccount?: string;
 }
 
+/** 시트에 있는 한 줄. key로 시트에서 같은 줄을 찾는다. */
 export interface MoneyRecord extends RecordDraft {
+  /** 화면용 고유값 (같은 내용 줄이 여러 개일 수 있어 순번을 붙임) */
   id: string;
-  source: "app" | "sheet" | "import";
-  sheetKey: string | null;
-  synced: boolean;
-  createdAt: string;
+  key: string;
 }
 
 export interface Sub {
@@ -31,36 +30,32 @@ export interface Sub {
 }
 
 export interface Category {
-  id: string;
   kind: "자산" | "부채" | "수입" | "지출";
   name: string;
   subs: Sub[];
-  sort: number;
 }
 
 export interface Account {
-  id: string;
+  sort: number;
   kind: "자산" | "부채";
   category: string;
-  subcategory: string | null;
+  subcategory: string;
   name: string;
-  startAmount: number;
-  memo: string | null;
+  start: number;
+  memo: string;
   hidden: boolean;
-  sort: number;
 }
 
 export interface Schedule {
-  id: string;
   name: string;
   day: number;
   weekend: "당기기" | "밀기" | null;
 }
 
-export interface Config {
-  sheetUrl: string | null;
-  sheetToken: string | null;
+export interface SheetSettings {
   startYear: number | null;
   fiscalMonth: number;
-  lastSync: string | null;
+  categories: Category[];
+  accounts: Account[];
+  schedules: Schedule[];
 }

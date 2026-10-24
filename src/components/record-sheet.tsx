@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { Settings } from "@/lib/db";
 import { formatNumber, splitEmoji, todayString } from "@/lib/format";
-import type { Kind, RecordDraft } from "@/lib/types";
+import type { Kind, RecordDraft, SheetSettings } from "@/lib/types";
 import { Sheet } from "./sheet";
 import { Button, Segmented } from "./ui";
 
@@ -15,7 +14,7 @@ const KINDS: { value: Kind; label: string }[] = [
 
 interface Props {
   open: boolean;
-  settings?: Settings;
+  settings?: SheetSettings;
   initial?: RecordDraft;
   onClose: () => void;
   onSave: (d: RecordDraft) => Promise<void>;
@@ -100,7 +99,7 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
               {cats.map((c) => {
                 const { emoji, label } = splitEmoji(c.name);
                 return (
-                  <Chip key={c.id} active={d.category === c.name} onClick={() => setD((p) => ({ ...p, category: c.name, subcategory: undefined }))}>
+                  <Chip key={c.name} active={d.category === c.name} onClick={() => setD((p) => ({ ...p, category: c.name, subcategory: undefined }))}>
                     {emoji && <span className="mr-1">{emoji}</span>}
                     {label}
                   </Chip>
@@ -175,7 +174,7 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
 }
 
 /** 시트 계좌 목록. 같은 이름(현대카드 일시불/할부)은 하나로 보여준다. */
-function AccountSelect({ settings, value, onChange }: { settings?: Settings; value?: string; onChange: (v?: string) => void }) {
+function AccountSelect({ settings, value, onChange }: { settings?: SheetSettings; value?: string; onChange: (v?: string) => void }) {
   const groups = new Map<string, string[]>();
   for (const a of settings?.accounts ?? []) {
     if (a.hidden) continue;

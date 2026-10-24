@@ -2,10 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { Plus } from "lucide-react";
-import { addRecords, deleteRecord, updateRecord } from "@/lib/db";
+import { useConnection } from "@/lib/connection";
 import { formatDayHeader, formatNumber } from "@/lib/format";
-import { useMonthRecords, useSettings } from "@/lib/hooks";
-import { syncPush } from "@/lib/sync-store";
+import { addRecords, deleteRecord, toRecords, updateRecord, useSheet } from "@/lib/store";
 import type { MoneyRecord } from "@/lib/types";
 import { useMonth } from "../app-shell";
 import { MonthSwitcher } from "../month-switcher";
@@ -16,8 +15,20 @@ import { LoadError, PageHeader } from "../ui";
 
 export function RecordsScreen() {
   const { month } = useMonth();
-  const { data: records, error } = useMonthRecords(month);
-  const { data: settings } = useSettings();
+  const conn = useConnection()!;
+  const { data, error } = useSheet();
+  const settings = data?.settings;
+  const records = useMemo(
+    // 시트는 PC에서 아무 줄에나 쓸 수 있어서 화면에서 날짜 내림차순으로 다시 정렬 (같은 날은 아래쪽 줄이 위로)
+    () =>
+      data
+        ? toRecords(data.rows)
+            .filter((r) => r.date.startsWith(month))
+            .reverse()
+            .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+        : undefined,
+    [data, month],
+  );
   const [editing, setEditing] = useState<MoneyRecord | "new" | null>(null);
 
   const { groups, income, expense } = useMemo(() => {
@@ -32,12 +43,10 @@ export function RecordsScreen() {
     return { groups: [...map.entries()], income, expense };
   }, [records]);
 
-  const afterChange = () => settings && syncPush(settings);
-
   return (
     <>
       <PageHeader title={<MonthSwitcher />} right={<SyncBadge />} />
-      {error ? (
+      {error && !records ? (
         <LoadError />
       ) : (
         records && (
@@ -73,7 +82,6 @@ export function RecordsScreen() {
                           key={r.id}
                           r={r}
                           onClick={() => setEditing(r)}
-                          note={!r.synced && <span className="text-[11px] text-ink-3">시트 반영 대기</span>}
                         />
                       ))}
                     </section>
@@ -99,18 +107,10 @@ export function RecordsScreen() {
         initial={editing && editing !== "new" ? editing : undefined}
         onClose={() => setEditing(null)}
         onSave={async (d) => {
-          if (editing && editing !== "new") await updateRecord(editing.id, d);
-          else await addRecords([d]);
-          afterChange();
+          if (editing && editing !== "new") await updateRecord(conn, editing, d);
+          else await addRecords(conn, [d]);
         }}
-        onDelete={
-          editing && editing !== "new"
-            ? async () => {
-                await deleteRecord(editing);
-                afterChange();
-              }
-            : undefined
-        }
+        onDelete={editing && editing !== "new" ? () => deleteRecord(conn, editing) : undefined}
       />
     </>
   );

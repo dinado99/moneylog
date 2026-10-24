@@ -1,34 +1,23 @@
 import type { SheetRow } from "./record-key";
-
-export interface SheetSettings {
-  startYear: number | null;
-  fiscalMonth: number;
-  categories: { kind: "자산" | "부채" | "수입" | "지출"; name: string; subs: { name: string; fixed: boolean }[] }[];
-  accounts: {
-    sort: number;
-    kind: "자산" | "부채";
-    category: string;
-    subcategory: string;
-    name: string;
-    start: number;
-    memo: string;
-    hidden: boolean;
-  }[];
-  schedules: { name: string; day: number; weekend: "당기기" | "밀기" | null }[];
-}
+import type { SheetSettings } from "./types";
 
 export type SheetOp = { op: "add"; row: SheetRow } | { op: "update"; match: string; row: SheetRow } | { op: "delete"; match: string };
 
+export interface Connection {
+  url: string;
+  token: string;
+}
+
 export class SheetError extends Error {}
 
-async function call<T>(url: string, token: string, body: object): Promise<T> {
+async function call<T>(c: Connection, body: object): Promise<T> {
   let res: Response;
   try {
     // text/plain이면 브라우저가 사전 확인(CORS preflight)을 하지 않아 Apps Script로 바로 보낼 수 있다
-    res = await fetch(url, {
+    res = await fetch(c.url, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ token, ...body }),
+      body: JSON.stringify({ token: c.token, ...body }),
       redirect: "follow",
     });
   } catch {
@@ -45,10 +34,12 @@ async function call<T>(url: string, token: string, body: object): Promise<T> {
   return data;
 }
 
-export function pullSheet(url: string, token: string) {
-  return call<{ records: SheetRow[]; settings: SheetSettings }>(url, token, { action: "pull" });
+export function pullSheet(c: Connection) {
+  return call<{ records: SheetRow[]; settings: SheetSettings }>(c, { action: "pull" });
 }
 
-export function pushSheet(url: string, token: string, ops: SheetOp[]) {
-  return call<{ results: { ok: boolean; error?: string }[] }>(url, token, { action: "push", ops });
+export async function pushSheet(c: Connection, ops: SheetOp[]) {
+  const { results } = await call<{ results: { ok: boolean; error?: string }[] }>(c, { action: "push", ops });
+  const failed = results.find((r) => !r.ok);
+  if (failed) throw new SheetError(failed.error ?? "시트에 반영하지 못했어요");
 }
