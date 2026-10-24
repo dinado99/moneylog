@@ -4,12 +4,15 @@ import { useMemo } from "react";
 import useSWR, { mutate } from "swr";
 import { useConnection } from "./connection";
 import { keyOfRow, toSheetRow, fromSheetRow, type SheetRow } from "./record-key";
-import { pullSheet, pushSheet, type Connection, type SheetOp } from "./sheet";
+import type { Rule } from "./import/to-sheet";
+import { adjustStart, pullSheet, pushSheet, saveRules, type Connection, type SheetOp } from "./sheet";
 import type { MoneyRecord, RecordDraft, SheetSettings } from "./types";
 
 export interface SheetData {
   rows: SheetRow[];
   settings: SheetSettings;
+  rules: Rule[];
+  version: number;
   fetchedAt: string;
 }
 
@@ -38,8 +41,8 @@ export function clearCache() {
 }
 
 async function fetchSheet(c: Connection): Promise<SheetData> {
-  const { records, settings } = await pullSheet(c);
-  const data = { rows: records, settings, fetchedAt: new Date().toISOString() };
+  const { records, settings, rules, version } = await pullSheet(c);
+  const data = { rows: records, settings, rules, version, fetchedAt: new Date().toISOString() };
   writeCache(data);
   return data;
 }
@@ -104,5 +107,21 @@ export const deleteRecord = (c: Connection, r: MoneyRecord) => send(c, [{ op: "d
 export function useData() {
   const sheet = useSheet();
   const records = useMemo(() => (sheet.data ? toRecords(sheet.data.rows) : undefined), [sheet.data]);
-  return { ...sheet, records, settings: sheet.data?.settings };
+  return { ...sheet, records, settings: sheet.data?.settings, rules: sheet.data?.rules ?? [] };
+}
+
+/** 뱅크샐러드 가져오기 저장: 기록 추가 → 새 규칙 저장 → 자산 시작금액 맞추기 → 다시 받기 */
+export async function saveImport(
+  c: Connection,
+  input: { drafts: RecordDraft[]; rules: Rule[]; adjust: { name: string; delta: number }[] },
+) {
+  if (input.drafts.length) await pushSheet(c, input.drafts.map((d) => ({ op: "add", row: toSheetRow(d) })));
+  if (input.rules.length) await saveRules(c, input.rules);
+  if (input.adjust.length) await adjustStart(c, input.adjust);
+  await mutate([...KEY, c.url]);
+}
+
+export async function removeRule(c: Connection, rule: Pick<Rule, "type" | "source">) {
+  await saveRules(c, [{ type: rule.type, source: rule.source, remove: true }]);
+  await mutate([...KEY, c.url]);
 }

@@ -1,4 +1,5 @@
 import type { SheetRow } from "./record-key";
+import type { Rule } from "./import/to-sheet";
 import type { SheetSettings } from "./types";
 
 export type SheetOp = { op: "add"; row: SheetRow } | { op: "update"; match: string; row: SheetRow } | { op: "delete"; match: string };
@@ -34,8 +35,29 @@ async function call<T>(c: Connection, body: object): Promise<T> {
   return data;
 }
 
-export function pullSheet(c: Connection) {
-  return call<{ records: SheetRow[]; settings: SheetSettings }>(c, { action: "pull" });
+/** 이 앱이 기대하는 스크립트 버전. 낮으면 새로 복사해 붙여넣으라고 안내한다 */
+export const SCRIPT_VERSION = 2;
+
+export async function pullSheet(c: Connection) {
+  const d = await call<{ version?: number; records: SheetRow[]; settings: SheetSettings; rules?: Rule[] }>(c, { action: "pull" });
+  return { ...d, version: d.version ?? 1, rules: d.rules ?? [] };
+}
+
+function outdated(e: unknown): never {
+  if (e instanceof SheetError && e.message.startsWith("알 수 없는 요청")) {
+    throw new SheetError("시트 스크립트가 예전 버전이에요. 설정에서 스크립트를 다시 복사해 붙여넣고 '새 버전'으로 배포해 주세요.");
+  }
+  throw e;
+}
+
+export async function saveRules(c: Connection, rules: (Rule | (Pick<Rule, "type" | "source"> & { remove: true }))[]) {
+  return call<{ rules: Rule[] }>(c, { action: "saveRules", rules }).catch(outdated);
+}
+
+export async function adjustStart(c: Connection, items: { name: string; delta: number }[]) {
+  const { results } = await call<{ results: { ok: boolean; error?: string }[] }>(c, { action: "adjustStart", items }).catch(outdated);
+  const failed = results.find((r) => !r.ok);
+  if (failed) throw new SheetError(failed.error ?? "시작금액을 바꾸지 못했어요");
 }
 
 export async function pushSheet(c: Connection, ops: SheetOp[]) {

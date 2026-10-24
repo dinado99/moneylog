@@ -5,8 +5,13 @@
  *       › 배포 › 새 배포 › 유형: 웹 앱, 실행: 나, 액세스: 모든 사용자 › 배포 › 웹 앱 URL 복사
  *       › 머니로그 앱 설정에 URL과 같은 비밀번호 입력
  *
- * 이 스크립트는 시트의 '가계부 기록' B~I열(날짜~출금계좌)만 읽고 쓴다. 다른 칸과 수식은 건드리지 않는다.
+ * 이 스크립트가 쓰는 곳: '가계부 기록' B~I열(날짜~출금계좌), '가계부 설정' 계좌표의 시작금액(T열, 자산 현황을
+ * 맞출 때만), 'moneylog 규칙' 탭(없으면 만듦). 다른 칸과 수식은 건드리지 않는다.
+ *
+ * 스크립트를 바꾼 뒤에는 배포 › 배포 관리 › 연필 › 버전: 새 버전 › 배포 (URL은 그대로)
  */
+
+const VERSION = 2;
 
 const TOKEN = '여기에-비밀번호를-적어주세요';
 
@@ -32,6 +37,8 @@ function doPost(e) {
   try {
     if (req.action === 'pull') return json(pull());
     if (req.action === 'push') return json(push(req.ops || []));
+    if (req.action === 'saveRules') return json(saveRules(req.rules || []));
+    if (req.action === 'adjustStart') return json(adjustStart(req.items || []));
     return json({ error: '알 수 없는 요청: ' + req.action });
   } catch (err) {
     return json({ error: String(err && err.message ? err.message : err) });
@@ -110,7 +117,7 @@ function pull() {
     .filter(function (r) {
       return r[0] && r[1] && r[5];
     });
-  return { records: records, settings: readSettings() };
+  return { version: VERSION, records: records, settings: readSettings(), rules: readRules() };
 }
 
 /**
@@ -220,4 +227,75 @@ function readSettings() {
     // 달력 시트가 없으면 일정 없이
   }
   return settings;
+}
+
+// ── 가져오기 규칙 ('moneylog 규칙' 탭: A 종류, B 원래 값, C 대분류 또는 계좌, D 소분류) ──
+
+const RULE_SHEET = 'moneylog 규칙';
+const RULE_TYPES = ['가맹점', '분류', '계좌'];
+
+function ruleSheet(create) {
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(RULE_SHEET);
+  if (!sheet && create) {
+    sheet = ss.insertSheet(RULE_SHEET);
+    sheet.getRange(1, 1, 1, 4).setValues([['종류', '원래 값', '대분류 / 계좌', '소분류']]);
+    sheet.getRange(1, 6).setValue('머니로그 앱의 뱅크샐러드 가져오기 규칙. 종류: 가맹점(내용에 포함된 글자), 분류(뱅크샐러드 대분류 또는 대분류>소분류), 계좌(뱅크샐러드 결제수단 이름 → 시트 계좌)');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function readRules() {
+  const sheet = ruleSheet(false);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, 4)
+    .getValues()
+    .filter(function (r) {
+      return RULE_TYPES.indexOf(str(r[0])) >= 0 && str(r[1]) && str(r[2]);
+    })
+    .map(function (r) {
+      return { type: str(r[0]), source: str(r[1]), category: str(r[2]), subcategory: str(r[3]) };
+    });
+}
+
+/** rules: [{type, source, category, subcategory, remove}] — 같은 종류·원래 값이 있으면 바꾸고, 없으면 추가 */
+function saveRules(rules) {
+  const sheet = ruleSheet(true);
+  const last = sheet.getLastRow();
+  const vals = last >= 2 ? sheet.getRange(2, 1, last - 1, 4).getValues() : [];
+  rules.forEach(function (r) {
+    const i = vals.findIndex(function (v) {
+      return str(v[0]) === r.type && str(v[1]) === r.source;
+    });
+    if (r.remove) {
+      if (i >= 0) vals.splice(i, 1);
+    } else if (i >= 0) {
+      vals[i] = [r.type, r.source, r.category, r.subcategory || ''];
+    } else {
+      vals.push([r.type, r.source, r.category, r.subcategory || '']);
+    }
+  });
+  if (last >= 2) sheet.getRange(2, 1, last - 1, 4).clearContent();
+  if (vals.length) sheet.getRange(2, 1, vals.length, 4).setValues(vals);
+  return { ok: true, rules: readRules() };
+}
+
+/** 자산 현황 맞추기: items [{name, delta}] — '가계부 설정' 계좌표에서 이름이 같은 첫 줄의 시작금액(T)에 delta를 더한다 */
+function adjustStart(items) {
+  const sheet = sheetByPrefix('가계부 설정');
+  const last = sheet.getLastRow();
+  const range = sheet.getRange(13, 19, Math.max(last - 12, 1), 2); // S 이름, T 시작금액
+  const vals = range.getValues();
+  const results = items.map(function (it) {
+    const i = vals.findIndex(function (v) {
+      return str(v[0]) === it.name;
+    });
+    if (i < 0) return { ok: false, error: it.name + ' 계좌를 찾지 못했어요' };
+    vals[i][1] = (Number(vals[i][1]) || 0) + Number(it.delta);
+    return { ok: true };
+  });
+  range.setValues(vals);
+  return { results: results };
 }

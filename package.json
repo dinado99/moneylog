@@ -14,6 +14,7 @@
     "next": "16.4.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "read-excel-file": "^9.3.12",
     "swr": "^2.5.1"
   },
   "devDependencies": {

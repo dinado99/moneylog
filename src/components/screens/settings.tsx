@@ -3,7 +3,10 @@
 import { useState } from "react";
 import { setConnection } from "@/lib/connection";
 import { formatNumber, splitEmoji } from "@/lib/format";
-import { clearCache, useSheet } from "@/lib/store";
+import { useConnection } from "@/lib/connection";
+import type { Rule } from "@/lib/import/to-sheet";
+import { SCRIPT_VERSION } from "@/lib/sheet";
+import { clearCache, removeRule, useSheet } from "@/lib/store";
 import type { SheetSettings } from "@/lib/types";
 import { ConnectForm } from "../connect-form";
 import { Card, PageHeader } from "../ui";
@@ -13,6 +16,14 @@ export function SettingsScreen() {
   return (
     <>
       <PageHeader title="설정" />
+      {data && data.version < SCRIPT_VERSION && (
+        <Card className="mb-3 border border-accent/30 p-5">
+          <p className="text-[15px] font-semibold text-accent">시트 스크립트를 업데이트해 주세요</p>
+          <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+            가져오기 규칙·자산 현황 맞추기를 쓰려면 새 스크립트가 필요해요. 아래 &apos;스크립트 복사&apos; → Apps Script에 붙여넣고 비밀번호를 다시 적은 뒤 저장 → 배포 › 배포 관리 › 연필 › 버전: 새 버전 › 배포. URL은 그대로예요.
+          </p>
+        </Card>
+      )}
       <ConnectForm />
       <Card className="mt-3 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4">
@@ -36,6 +47,7 @@ export function SettingsScreen() {
         </div>
       </Card>
       {data && <SheetData settings={data.settings} />}
+      {data && <Rules rules={data.rules} />}
       <Card className="mt-3 overflow-hidden">
         <button
           onClick={() => {
@@ -103,6 +115,52 @@ function SheetData({ settings }: { settings: SheetSettings }) {
           </div>
         )}
       </div>
+    </Card>
+  );
+}
+
+function Rules({ rules }: { rules: Rule[] }) {
+  const conn = useConnection()!;
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  return (
+    <Card className="mt-3 overflow-hidden">
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between px-5 py-4 text-left">
+        <span>
+          <span className="block text-[15px] font-medium">가져오기 규칙</span>
+          <span className="block text-[12px] text-ink-3">시트 &apos;moneylog 규칙&apos; 탭 · 가져오기에서 고치면 자동으로 쌓여요</span>
+        </span>
+        <span className="text-[13px] text-ink-3">{rules.length}개</span>
+      </button>
+      {open && (
+        <div className="border-t border-line py-2">
+          {rules.length === 0 && <p className="px-5 py-4 text-center text-[13px] text-ink-3">아직 규칙이 없어요</p>}
+          {rules.map((r) => (
+            <div key={`${r.type}|${r.source}`} className="flex items-center gap-2 px-5 py-2 text-[13px]">
+              <span className="shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-[11px] text-ink-2">{r.type}</span>
+              <span className="min-w-0 flex-1 truncate">
+                {r.source} <span className="text-ink-3">→ {[r.category, r.subcategory].filter(Boolean).join(" › ")}</span>
+              </span>
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await removeRule(conn, r);
+                  } catch (e) {
+                    alert(e instanceof Error ? e.message : "지우지 못했어요");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                className="shrink-0 text-[12px] text-danger disabled:opacity-40"
+              >
+                삭제
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import Link from "next/link";
+import { Import, Plus } from "lucide-react";
 import { useConnection } from "@/lib/connection";
 import { formatDayHeader, formatNumber } from "@/lib/format";
 import { addRecords, deleteRecord, toRecords, updateRecord, useSheet } from "@/lib/store";
@@ -45,7 +46,17 @@ export function RecordsScreen() {
 
   return (
     <>
-      <PageHeader title={<MonthSwitcher />} right={<SyncBadge />} />
+      <PageHeader
+        title={<MonthSwitcher />}
+        right={
+          <div className="flex items-center gap-1.5">
+            <Link href="/import" aria-label="뱅크샐러드 가져오기" className="grid size-8 place-items-center rounded-full bg-surface text-ink-2">
+              <Import size={16} />
+            </Link>
+            <SyncBadge />
+          </div>
+        }
+      />
       {error && !records ? (
         <LoadError />
       ) : (
