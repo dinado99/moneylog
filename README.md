@@ -19,8 +19,8 @@
 ## Supabase 설정
 
 1. [supabase.com](https://supabase.com)에서 프로젝트 생성
-2. SQL Editor에서 `supabase/migrations/` 안의 SQL 파일을 이름 순서대로 실행
-   (Supabase CLI를 쓴다면 `supabase link` 후 `supabase db push`)
+2. SQL Editor에서 `supabase/setup.sql`을 통째로 실행 (여러 번 실행해도 안전)
+   (Supabase CLI를 쓴다면 `supabase link` 후 `supabase db push`로 `supabase/migrations/`를 적용)
 3. Project Settings › API에서 URL과 publishable key(구 anon key)를 환경 변수에 입력
 4. Authentication › URL Configuration의 Site URL을 배포 주소로 설정 (가입 인증 메일 링크용)
 5. 앱에서 가입해서 계정을 만든 뒤, 혼자 쓸 거라면 Authentication › Sign In / Providers에서

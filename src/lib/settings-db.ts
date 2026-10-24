@@ -61,7 +61,7 @@ async function fetchSettings(): Promise<Settings> {
   };
 }
 
-async function seedDefaults() {
+async function seedCategories() {
   const db = supabase();
   const mains = check(
     await db
@@ -74,18 +74,19 @@ async function seedDefaults() {
     return c.subs.map((name, i) => ({ type: c.type, parent_id: parent.id, name, sort: i }));
   });
   check(await db.from("categories").insert(subs));
-  check(await db.from("asset_groups").insert(DEFAULT_ASSET_GROUPS.map((g, i) => ({ ...g, sort: i }))));
 }
 
-/** 분류·자산 설정. 처음이면 기본값을 넣어 준다. */
+async function seedGroups() {
+  check(await supabase().from("asset_groups").insert(DEFAULT_ASSET_GROUPS.map((g, i) => ({ ...g, sort: i }))));
+}
+
+/** 분류·자산 설정. 분류나 자산 그룹이 하나도 없으면 기본값을 넣어 준다. */
 export async function loadSettings(): Promise<Settings> {
   const s = await fetchSettings();
-  if (s.categories.length || s.groups.length) return s;
-  try {
-    await seedDefaults();
-  } catch {
-    // 다른 탭에서 동시에 넣은 경우(unique 충돌) 등은 다시 읽기만 하면 된다
-  }
+  if (s.categories.length && s.groups.length) return s;
+  // 다른 탭에서 동시에 넣은 경우(unique 충돌) 등은 다시 읽기만 하면 된다
+  if (!s.categories.length) await seedCategories().catch(() => {});
+  if (!s.groups.length) await seedGroups().catch(() => {});
   return fetchSettings();
 }
 
