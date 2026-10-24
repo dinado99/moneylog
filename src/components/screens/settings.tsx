@@ -75,9 +75,9 @@ export function SettingsScreen() {
       {message && <p className="mx-4 mb-3 rounded-2xl bg-surface px-4 py-3 text-[14px] text-ink-2">{message}</p>}
 
       <Card className="overflow-hidden">
-        <LinkRow href="/settings/expense" label="지출 분류" first />
+        <LinkRow href="/import" label="가져오기 (엑셀·붙여넣기)" first />
+        <LinkRow href="/settings/expense" label="지출 분류" />
         <LinkRow href="/settings/income" label="수입 분류" />
-        <LinkRow href="/settings/assets" label="자산" />
         <Row label="저장된 내역 분류 다시 맞추기" onClick={remap} />
       </Card>
 

@@ -17,41 +17,52 @@ import {
   type Settings,
 } from "@/lib/settings-db";
 import { Sheet } from "../sheet";
-import { BackHeader, Button, LoadError, TextInput } from "../ui";
+import { Button, LoadError, PageHeader, TextInput } from "../ui";
 
 type Editing =
   | { kind: "group"; group?: AssetGroup }
   | { kind: "asset"; asset?: Asset; groupId: string };
 
-export function AssetSettingsScreen() {
+export function AssetsScreen() {
   const { data: settings, error } = useSettings();
   const [editing, setEditing] = useState<Editing | null>(null);
 
   if (error) return <LoadError />;
   if (!settings) return null;
   const sum = (list: Asset[]) => list.reduce((n, a) => n + (a.balance ?? 0), 0);
+  const plus = settings.assets.reduce((n, a) => n + Math.max(a.balance ?? 0, 0), 0);
+  const minus = settings.assets.reduce((n, a) => n + Math.min(a.balance ?? 0, 0), 0);
   const updated = settings.assets.map((a) => a.balance_updated_at).filter(Boolean).sort().at(-1);
 
   return (
     <>
-      <BackHeader
+      <PageHeader
         title="자산"
-        href="/settings"
         right={
           <button aria-label="그룹 추가" onClick={() => setEditing({ kind: "group" })} className="text-ink-2">
             <Plus size={24} />
           </button>
         }
       />
-      <div className="px-5 pt-2 pb-5">
-        <p className="text-[14px] text-ink-3">총 자산</p>
-        <p className="num mt-1 text-[30px] font-bold leading-tight">{formatNumber(sum(settings.assets))}원</p>
-        {updated && (
-          <p className="mt-1 text-[12px] text-ink-3">
-            잔액 기준 {new Date(updated).toLocaleDateString("ko-KR", { month: "long", day: "numeric" })}
-          </p>
-        )}
+      <div className="mx-4 mb-1 grid grid-cols-3 rounded-3xl bg-surface py-4 text-center">
+        <div>
+          <p className="text-[13px] text-ink-3">자산</p>
+          <p className="num mt-1 text-[16px] font-bold text-income">{formatNumber(plus)}</p>
+        </div>
+        <div className="border-x border-line">
+          <p className="text-[13px] text-ink-3">부채</p>
+          <p className="num mt-1 text-[16px] font-bold text-danger">{formatNumber(minus)}</p>
+        </div>
+        <div>
+          <p className="text-[13px] text-ink-3">합계</p>
+          <p className="num mt-1 text-[16px] font-bold">{formatNumber(plus + minus)}</p>
+        </div>
       </div>
+      <p className="mb-3 px-5 text-right text-[12px] text-ink-3">
+        {updated
+          ? `잔액 기준 ${new Date(updated).toLocaleDateString("ko-KR", { month: "long", day: "numeric" })}`
+          : "잔액은 뱅크샐러드 자산 현황을 가져오거나 직접 입력해요"}
+      </p>
       <div className="space-y-3">
         {settings.groups.map((g) => {
           const assets = settings.assets.filter((a) => a.group_id === g.id);
@@ -61,7 +72,7 @@ export function AssetSettingsScreen() {
                 <span className="text-[18px]">{g.emoji}</span>
                 <span className="flex-1 text-[15px] font-semibold">{g.name}</span>
                 {assets.some((a) => a.balance !== null) && (
-                  <span className="num text-[14px] font-medium text-ink-2">{formatNumber(sum(assets))}원</span>
+                  <span className={`num text-[14px] font-semibold ${tone(sum(assets))}`}>{formatNumber(sum(assets))}원</span>
                 )}
                 <button
                   aria-label={`${g.name} 그룹 수정`}
@@ -78,7 +89,9 @@ export function AssetSettingsScreen() {
                   className="flex w-full items-center border-t border-line px-5 py-3.5 text-left text-[15px] active:bg-surface-2"
                 >
                   <span className="min-w-0 flex-1 truncate">{a.name}</span>
-                  {a.balance !== null && <span className="num ml-3 shrink-0 font-medium">{formatNumber(a.balance)}원</span>}
+                  {a.balance !== null && (
+                    <span className={`num ml-3 shrink-0 font-medium ${tone(a.balance)}`}>{formatNumber(a.balance)}원</span>
+                  )}
                 </button>
               ))}
               <button
@@ -92,7 +105,7 @@ export function AssetSettingsScreen() {
         })}
       </div>
       <p className="mx-5 mt-3 text-[13px] leading-relaxed text-ink-3">
-        가져온 내역의 결제수단은 자동으로 여기에 추가돼요. 이름을 바꾸면 예전 이름은 별칭으로 남아서 다음에 가져올 때도 같은
+        카드 미결제금처럼 갚아야 할 돈은 잔액을 -로 넣으면 부채로 잡혀요. 가져온 내역의 결제수단은 자동으로 여기에 추가돼요. 이름을 바꾸면 예전 이름은 별칭으로 남아서 다음에 가져올 때도 같은
         자산으로 인식해요. 이미 있는 자산 이름으로 바꾸면 둘이 합쳐져요.
       </p>
 
@@ -112,6 +125,11 @@ export function AssetSettingsScreen() {
       </Sheet>
     </>
   );
+}
+
+/** 잔액 색: 양수 파랑, 음수(부채) 빨강, 0 회색 */
+function tone(n: number) {
+  return n > 0 ? "text-income" : n < 0 ? "text-danger" : "text-ink-3";
 }
 
 function useRunner() {

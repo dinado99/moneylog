@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight, Import, Plus } from "lucide-react";
+import { slices } from "@/lib/chart";
 import { useCategoryLook } from "@/lib/category-look";
+import { useSettings } from "@/lib/settings-db";
 import { deleteTxn, saveTxn } from "@/lib/db";
 import { currentMonth, daysInMonth, formatNumber, formatWon, todayString } from "@/lib/format";
 import type { Txn } from "@/lib/types";
@@ -19,6 +21,7 @@ export function HomeScreen() {
   const { data: txns, error } = useMonthTxns(month);
   const [editing, setEditing] = useState<Txn | "new" | null>(null);
   const look = useCategoryLook();
+  const { data: settings } = useSettings();
 
   const stats = useMemo(() => {
     const list = txns ?? [];
@@ -38,11 +41,25 @@ export function HomeScreen() {
 
   if (error) return <LoadError />;
   if (!txns) return null;
+  const chart = slices(
+    stats.cats,
+    (settings?.categories ?? []).filter((c) => c.type === "expense" && !c.parent_id).map((c) => c.name),
+  );
   const recent = txns.slice(0, 5);
 
   return (
     <>
-      <PageHeader title={<MonthSwitcher />} />
+      <PageHeader
+        title={<MonthSwitcher />}
+        right={
+          <Link
+            href="/import"
+            className="flex h-9 items-center gap-1.5 rounded-full bg-surface px-3.5 text-[14px] font-medium text-ink-2 active:bg-surface-2"
+          >
+            <Import size={16} /> 가져오기
+          </Link>
+        }
+      />
 
       <div className="px-5 pt-2 pb-6">
         <p className="text-[14px] text-ink-3">지출</p>
@@ -57,31 +74,30 @@ export function HomeScreen() {
         </div>
       </div>
 
-      {stats.cats.length > 0 && (
-        <Card className="p-5">
-          <h2 className="text-[16px] font-semibold">어디에 썼을까</h2>
-          <div className="mt-4 flex h-2.5 overflow-hidden rounded-full bg-surface-2">
-            {stats.cats.map(([name, v]) => (
-              <span
-                key={name}
-                style={{ width: `${(v / stats.expense) * 100}%`, background: look("expense", name).color }}
-                className="h-full border-r-2 border-surface last:border-r-0"
-              />
+      {chart.length > 0 && (
+        <Link href="/stats" className="mx-4 block rounded-3xl bg-surface p-5 active:opacity-90">
+          <div className="flex items-center justify-between">
+            <h2 className="text-[16px] font-semibold">어디에 썼을까</h2>
+            <ChevronRight size={18} className="text-ink-3" />
+          </div>
+          <div className="mt-4 flex h-2.5 gap-0.5 overflow-hidden rounded-full">
+            {chart.map((d) => (
+              <span key={d.name} style={{ width: `${d.pct * 100}%`, background: d.color }} className="h-full" />
             ))}
           </div>
           <ul className="mt-4 space-y-3">
-            {stats.cats.slice(0, 5).map(([name, v]) => (
-              <li key={name} className="flex items-center gap-3 text-[15px]">
-                <span className="size-2 rounded-full" style={{ background: look("expense", name).color }} />
-                <span className="flex-1">
-                  {look("expense", name).emoji} {name}
+            {chart.slice(0, 5).map((d) => (
+              <li key={d.name} className="flex items-center gap-3 text-[15px]">
+                <span className="size-2 shrink-0 rounded-full" style={{ background: d.color }} />
+                <span className="min-w-0 flex-1 truncate">
+                  {!d.others && look("expense", d.name).emoji} {d.name}
                 </span>
-                <span className="num text-[13px] text-ink-3">{Math.round((v / stats.expense) * 100)}%</span>
-                <span className="num w-24 text-right font-medium">{formatNumber(v)}</span>
+                <span className="num text-[13px] text-ink-3">{Math.round(d.pct * 100)}%</span>
+                <span className="num w-24 text-right font-medium">{formatNumber(d.value)}</span>
               </li>
             ))}
           </ul>
-        </Card>
+        </Link>
       )}
 
       <Card className="mt-3 py-2">

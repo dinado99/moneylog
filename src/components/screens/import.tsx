@@ -231,7 +231,7 @@ export function ImportScreen() {
                 }
                 // 탭을 오가도 화면 상태가 유지되므로 다음 가져오기를 위해 처음으로 되돌린다
                 setState({ step: "pick" });
-                router.push(drafts.length ? "/history" : "/settings/assets");
+                router.push(drafts.length ? "/history" : "/assets");
               } catch {
                 alert("저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
               } finally {
