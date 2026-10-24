@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "머니로그",
     short_name: "머니로그",
-    description: "뱅크샐러드 내역으로 채우는 가계부",
+    description: "개인 가계부",
     start_url: "/",
     display: "standalone",
     background_color: "#fde8f0",

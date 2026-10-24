@@ -1,10 +1,9 @@
 import type { Metadata, Viewport } from "next";
-import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "머니로그",
-  description: "뱅크샐러드 내역으로 채우는 가계부",
+  description: "개인 가계부",
   appleWebApp: { capable: true, title: "머니로그", statusBarStyle: "default" },
 };
 
@@ -29,7 +28,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         />
       </head>
       <body className="min-h-dvh">
-        <AppShell>{children}</AppShell>
+        <div className="pt-safe pb-safe mx-auto min-h-dvh max-w-md">{children}</div>
       </body>
     </html>
   );
