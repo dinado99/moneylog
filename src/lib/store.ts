@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import useSWR, { mutate } from "swr";
 import { useConnection } from "./connection";
 import { keyOfRow, toSheetRow, fromSheetRow, type SheetRow } from "./record-key";
@@ -98,3 +99,10 @@ async function send(c: Connection, ops: SheetOp[]) {
 export const addRecords = (c: Connection, drafts: RecordDraft[]) => send(c, drafts.map((d) => ({ op: "add", row: toSheetRow(d) })));
 export const updateRecord = (c: Connection, r: MoneyRecord, d: RecordDraft) => send(c, [{ op: "update", match: r.key, row: toSheetRow(d) }]);
 export const deleteRecord = (c: Connection, r: MoneyRecord) => send(c, [{ op: "delete", match: r.key }]);
+
+/** 화면에서 쓰는 기록 목록 + 시트 설정 */
+export function useData() {
+  const sheet = useSheet();
+  const records = useMemo(() => (sheet.data ? toRecords(sheet.data.rows) : undefined), [sheet.data]);
+  return { ...sheet, records, settings: sheet.data?.settings };
+}

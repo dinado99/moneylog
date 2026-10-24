@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ListOrdered, Settings } from "lucide-react";
+import { CalendarDays, ChartPie, ListOrdered, Settings, WalletCards } from "lucide-react";
 
 const TABS = [
   { href: "/", label: "내역", icon: ListOrdered },
+  { href: "/calendar", label: "달력", icon: CalendarDays },
+  { href: "/reports", label: "보고서", icon: ChartPie },
+  { href: "/assets", label: "자산", icon: WalletCards },
   { href: "/settings", label: "설정", icon: Settings },
 ] as const;
 
