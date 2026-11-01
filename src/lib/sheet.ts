@@ -36,7 +36,7 @@ async function call<T>(c: Connection, body: object): Promise<T> {
 }
 
 /** 이 앱이 기대하는 스크립트 버전. 낮으면 새로 복사해 붙여넣으라고 안내한다 */
-export const SCRIPT_VERSION = 2;
+export const SCRIPT_VERSION = 3;
 
 export async function pullSheet(c: Connection) {
   const d = await call<{ version?: number; records: SheetRow[]; settings: SheetSettings; rules?: Rule[] }>(c, { action: "pull" });
@@ -54,14 +54,16 @@ export async function saveRules(c: Connection, rules: (Rule | (Pick<Rule, "type"
   return call<{ rules: Rule[] }>(c, { action: "saveRules", rules }).catch(outdated);
 }
 
-export async function adjustStart(c: Connection, items: { name: string; delta: number }[]) {
-  const { results } = await call<{ results: { ok: boolean; error?: string }[] }>(c, { action: "adjustStart", items }).catch(outdated);
-  const failed = results.find((r) => !r.ok);
-  if (failed) throw new SheetError(failed.error ?? "시작금액을 바꾸지 못했어요");
-}
-
 export async function pushSheet(c: Connection, ops: SheetOp[]) {
   const { results } = await call<{ results: { ok: boolean; error?: string }[] }>(c, { action: "push", ops });
   const failed = results.find((r) => !r.ok);
   if (failed) throw new SheetError(failed.error ?? "시트에 반영하지 못했어요");
+}
+
+export async function replaceAccounts(
+  c: Connection,
+  accounts: { kind: string; category: string; subcategory: string; name: string; start: number; memo: string; hidden: boolean }[],
+  renames: { from: string; to: string }[],
+) {
+  return call<{ ok: boolean; renamedRecords: number }>(c, { action: "replaceAccounts", accounts, renames }).catch(outdated);
 }

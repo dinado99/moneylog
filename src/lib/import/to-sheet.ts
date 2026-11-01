@@ -84,6 +84,9 @@ const MERCHANT: [RegExp, string, string?][] = [
 
 const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
 
+// 카드사·은행 이름 (긴 것부터)
+const BRANDS = ["카카오뱅크", "토스뱅크", "케이뱅크", "농협", "nh", "kb", "국민", "신한", "삼성", "현대", "롯데", "하나", "우리", "비씨", "bc", "씨티", "카카오", "토스", "네이버"];
+
 /** 이동은 대분류 없음. 뱅크샐러드 타입 → 시트 구분 */
 const KIND: Record<BankRow["type"], Kind> = { expense: "지출", income: "수입", transfer: "이동" };
 
@@ -147,11 +150,20 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
     }
     if (best) return best;
     const rawCore = target.replace(/카드$/, "");
-    if (rawCore.length < 2) return undefined;
-    let hits = accounts.filter((a) => within(rawCore, norm(a)));
-    // "삼성카드"면 삼성증권 말고 카드 계좌만
-    if (hits.length > 1 && /카드/.test(raw)) hits = hits.filter((a) => /카드/.test(a));
-    return hits.length === 1 ? hits[0] : undefined;
+    if (rawCore.length >= 2) {
+      let hits = accounts.filter((a) => within(rawCore, norm(a)));
+      // "삼성카드"면 삼성증권 말고 카드 계좌만
+      if (hits.length > 1 && /카드/.test(raw)) hits = hits.filter((a) => /카드/.test(a));
+      if (hits.length === 1) return hits[0];
+    }
+    // 마지막으로 카드는 카드사 이름이 같은 카드가 하나뿐이면 같은 것 ("신세계이마트 삼성카드" ↔ "삼성SFC카드").
+    // 통장·증권은 같은 은행에 여러 개일 수 있어 이렇게 맞추지 않는다
+    const brand = /카드/.test(raw) && BRANDS.find((b) => target.includes(b));
+    if (brand) {
+      const hits = accounts.filter((a) => /카드/.test(a) && norm(a).includes(brand));
+      if (hits.length === 1) return hits[0];
+    }
+    return undefined;
   }
 
   function map(row: BankRow): Mapped {

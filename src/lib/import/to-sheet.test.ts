@@ -84,3 +84,12 @@ describe("음수(차감)", () => {
     expect([out[2].draft.inAccount, out[2].draft.outAccount]).toEqual(["우리은행", "카카오페이"]);
   });
 });
+
+describe("계좌 이름 맞추기", () => {
+  it("카드사 이름이 같은 카드가 하나면 같은 계좌", () => {
+    const map = makeMapper(settings, [], []);
+    expect(map.account("신세계이마트 삼성카드")).toBe("삼성SFC카드");
+    expect(map.account("네이버 현대카드")).toBe("현대카드");
+    expect(map.account("삼성증권 CMA")).toBe(undefined);
+  });
+});

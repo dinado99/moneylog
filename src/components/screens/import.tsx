@@ -3,10 +3,9 @@
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ClipboardPaste, FileSpreadsheet, LoaderCircle } from "lucide-react";
-import { balances } from "@/lib/analytics";
 import { useConnection } from "@/lib/connection";
 import { formatNumber, todayString } from "@/lib/format";
-import type { AssetRow } from "@/lib/import/assets";
+import { MAX_ACCOUNTS, planReset, type ResetPlan } from "@/lib/import/accounts-reset";
 import { ImportError, parsePastedText, parseSpreadsheetFile, type ImportResult } from "@/lib/import/file";
 import { dedupeKey, makeMapper, type Mapped, type Rule } from "@/lib/import/to-sheet";
 import { SheetError } from "@/lib/sheet";
@@ -25,18 +24,13 @@ interface Item {
   selected: boolean;
 }
 
-interface AssetItem extends AssetRow {
-  account?: string;
-  current?: number;
-  apply: boolean;
-}
-
 export function ImportScreen() {
   const router = useRouter();
   const conn = useConnection()!;
   const { records, settings, rules } = useData();
   const [items, setItems] = useState<Item[] | null>(null);
-  const [assets, setAssets] = useState<AssetItem[]>([]);
+  const [reset, setReset] = useState<ResetPlan | null>(null);
+  const [applyReset, setApplyReset] = useState(true);
   const [skipped, setSkipped] = useState(0);
   const [newRules, setNewRules] = useState<Rule[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -66,13 +60,8 @@ export function ImportScreen() {
           return { key, m, draft: m.draft, dup: left > 0, selected: left === 0 };
         }),
       );
-      const now = balances(settings.accounts, records, todayString());
-      setAssets(
-        assetRows.map((a) => {
-          const account = map.account(a.name);
-          return { ...a, account, current: now.find((b) => b.name === account)?.balance, apply: !!account };
-        }),
-      );
+      setReset(assetRows.length ? planReset(settings, records, assetRows, map.account, todayString()) : null);
+      setApplyReset(true);
       setSkipped(txns.skipped);
       setNewRules([]);
     } catch (e) {
@@ -106,15 +95,13 @@ export function ImportScreen() {
     setBusy("시트에 저장하고 있어요");
     setError(null);
     try {
-      const adjust = assets
-        .filter((a) => a.apply && a.account && a.current !== undefined && a.balance !== a.current)
-        .map((a) => ({ name: a.account!, delta: a.balance - a.current! }));
-      // 자산 이름 → 계좌도 규칙으로 기억
-      const assetRules: Rule[] = assets.filter((a) => a.apply && a.account && a.account !== a.name).map((a) => ({ type: "계좌", source: a.name, category: a.account!, subcategory: "" }));
-      await saveImport(conn, { drafts: items.filter((i) => i.selected).map((i) => i.draft), rules: [...newRules, ...assetRules], adjust });
+      if (reset && applyReset && reset.accounts.length > MAX_ACCOUNTS) {
+        throw new SheetError(`시트 계좌표에는 ${MAX_ACCOUNTS}개까지 들어가요. 지금 ${reset.accounts.length}개예요.`);
+      }
+      await saveImport(conn, { drafts: items.filter((i) => i.selected).map((i) => i.draft), rules: newRules, reset: reset && applyReset ? reset : undefined });
       // 탭을 오가도 화면 상태가 남으므로 처음 화면으로 되돌려 둔다
       setItems(null);
-      setAssets([]);
+      setReset(null);
       router.push("/");
     } catch (e) {
       setError(e instanceof SheetError ? e.message : "저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
@@ -145,7 +132,7 @@ export function ImportScreen() {
           <p>· 분류는 ① 내가 만든 규칙 ② 예전에 같은 가게를 넣은 기록 ③ 뱅크샐러드 → 낼나 분류표 순서로 자동으로 맞춰요.</p>
           <p>· 저장 전에 확인하고 고칠 수 있어요. 고친 분류·계좌는 시트 &apos;moneylog 규칙&apos; 탭에 저장돼서 다음부터 자동이에요.</p>
           <p>· 시트에 이미 있는 내역(날짜·금액·내용이 같은 것)은 빼둬요.</p>
-          <p>· 자산 현황을 넣으면 시트 계산 잔액과 비교해서, 다르면 &apos;가계부 설정&apos;의 시작금액을 맞춰요.</p>
+          <p>· 자산·부채 현황을 넣으면 시트 &apos;가계부 설정&apos;의 계좌 목록을 뱅크샐러드 이름·금액 그대로 통째로 바꿔요. 예전 계좌 이름을 쓴 기록도 새 이름으로 바꿔요.</p>
         </div>
         <input
           ref={fileInput}
@@ -188,7 +175,7 @@ export function ImportScreen() {
   const selected = items.filter((i) => i.selected);
   const needCat = selected.filter((i) => i.draft.kind !== "이동" && !i.draft.category).length;
   const unlinked = [...new Set(items.filter((i) => i.m.needsAccount && i.m.rawAccount).map((i) => i.m.rawAccount!))];
-  const assetChanges = assets.filter((a) => a.apply && a.account && a.current !== undefined && a.balance !== a.current).length;
+  const resetCount = reset && applyReset ? reset.accounts.length : 0;
   const editingItem = items.find((i) => i.key === editing);
 
   return (
@@ -232,43 +219,49 @@ export function ImportScreen() {
         </Card>
       )}
 
-      {assets.length > 0 && (
+      {reset && (
         <Card className="mb-3 py-2">
-          <div className="px-5 pt-3 pb-1">
-            <p className="text-[15px] font-semibold">자산 현황 {assets.length}개</p>
-            <p className="mt-0.5 text-[13px] text-ink-3">체크한 계좌는 시트 잔액이 뱅크샐러드 금액이 되도록 시작금액을 맞춰요.</p>
+          <div className="flex items-start gap-3 px-5 pt-3 pb-2">
+            <span className="min-w-0 flex-1">
+              <span className="block text-[15px] font-semibold">자산·부채 목록을 뱅크샐러드로 바꾸기</span>
+              <span className="mt-0.5 block text-[13px] leading-relaxed text-ink-3">
+                시트 &apos;가계부 설정&apos;의 계좌 목록을 아래 {reset.accounts.length}개로 통째로 바꾸고, 잔액이 뱅크샐러드 금액이 되게 시작금액을 맞춰요.
+              </span>
+            </span>
+            <Check3 on={applyReset} onClick={() => setApplyReset(!applyReset)} />
           </div>
-          {assets.map((a, i) => {
-            const diff = a.current !== undefined ? a.balance - a.current : null;
+          {(["자산", "부채"] as const).map((side) => {
+            const list = reset.accounts.filter((a) => a.kind === side);
+            if (!list.length) return null;
             return (
-              <div key={i} className="flex items-center gap-3 px-5 py-2.5">
-                <Check3 on={a.apply && !!a.account} onClick={() => setAssets((l) => l.map((x, j) => (j === i ? { ...x, apply: !x.apply } : x)))} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[14px]">{a.name}</span>
-                  <select
-                    value={a.account ?? ""}
-                    onChange={(e) => {
-                      const account = e.target.value || undefined;
-                      const now = balances(settings!.accounts, records!, todayString());
-                      setAssets((l) => l.map((x, j) => (j === i ? { ...x, account, current: now.find((b) => b.name === account)?.balance, apply: !!account } : x)));
-                    }}
-                    className="mt-0.5 w-full appearance-none bg-transparent text-[12px] text-ink-3 outline-none"
-                  >
-                    <option value="">시트 계좌 선택 (안 하면 건너뜀)</option>
-                    {accountNames.map((n) => (
-                      <option key={n} value={n}>
-                        → {n}
-                      </option>
-                    ))}
-                  </select>
-                </span>
-                <span className="num shrink-0 text-right text-[13px]">
-                  <span className="block font-medium">{formatNumber(a.balance)}</span>
-                  {diff !== null && <span className={`block text-[11px] ${diff ? "text-accent" : "text-ink-3"}`}>{diff ? `시트보다 ${diff > 0 ? "+" : ""}${formatNumber(diff)}` : "시트와 같음"}</span>}
-                </span>
+              <div key={side} className={applyReset ? "" : "opacity-40"}>
+                <p className="px-5 pt-2 pb-1 text-[12px] font-semibold text-ink-3">{side}</p>
+                {list.map((a) => (
+                  <div key={a.name} className="flex items-center gap-3 px-5 py-2">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[14px]">{a.name}</span>
+                      <span className="block truncate text-[12px] text-ink-3">
+                        {[a.category, a.subcategory].filter(Boolean).join(" › ")}
+                        {a.renamedFrom && <span className="text-accent"> · 예전 &apos;{a.renamedFrom}&apos;</span>}
+                      </span>
+                    </span>
+                    <span className={`num shrink-0 text-[14px] font-medium ${side === "부채" ? "text-danger" : ""}`}>{formatNumber(a.balance)}</span>
+                  </div>
+                ))}
               </div>
             );
           })}
+          {applyReset && (reset.renames.length > 0 || reset.removed.length > 0) && (
+            <div className="mx-5 my-2 space-y-1 rounded-2xl bg-surface-2 px-4 py-3 text-[12px] leading-relaxed text-ink-2">
+              {reset.renames.length > 0 && <p>이름이 바뀌는 계좌 {reset.renames.length}개는 예전 기록 속 이름도 같이 바꿔요.</p>}
+              {reset.removed.length > 0 && (
+                <p>
+                  목록에서 빠지는 계좌: {reset.removed.join(", ")}
+                  <span className="text-ink-3"> (그 계좌를 쓴 예전 기록은 남지만 잔고에는 안 잡혀요)</span>
+                </p>
+              )}
+            </div>
+          )}
         </Card>
       )}
 
@@ -292,8 +285,8 @@ export function ImportScreen() {
 
       {error && <p className="mx-4 mt-3 rounded-2xl bg-danger/10 px-4 py-3 text-[14px] text-danger">{error}</p>}
       <div className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+56px)] z-20 mx-auto max-w-md bg-gradient-to-t from-bg via-bg to-transparent px-4 pt-6 pb-3">
-        <Button className="w-full" disabled={(!selected.length && !assetChanges) || needCat > 0} onClick={save}>
-          {[selected.length && `${selected.length}건`, assetChanges && `잔액 ${assetChanges}개`].filter(Boolean).join(" · ") || "0건"} 시트에 저장
+        <Button className="w-full" disabled={(!selected.length && !resetCount) || needCat > 0} onClick={save}>
+          {[selected.length && `${selected.length}건`, resetCount && `계좌 ${resetCount}개`].filter(Boolean).join(" · ") || "0건"} 시트에 저장
         </Button>
       </div>
       <div className="h-24" />

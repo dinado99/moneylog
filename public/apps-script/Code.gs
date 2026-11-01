@@ -5,13 +5,13 @@
  *       › 배포 › 새 배포 › 유형: 웹 앱, 실행: 나, 액세스: 모든 사용자 › 배포 › 웹 앱 URL 복사
  *       › 머니로그 앱 설정에 URL과 같은 비밀번호 입력
  *
- * 이 스크립트가 쓰는 곳: '가계부 기록' B~I열(날짜~출금계좌), '가계부 설정' 계좌표의 시작금액(T열, 자산 현황을
- * 맞출 때만), 'moneylog 규칙' 탭(없으면 만듦). 다른 칸과 수식은 건드리지 않는다.
+ * 이 스크립트가 쓰는 곳: '가계부 기록' B~I열(날짜~출금계좌), '가계부 설정' 계좌표 P~V열(뱅크샐러드 자산 현황으로
+ * 바꿀 때만, O열 정렬 수식은 그대로), 'moneylog 규칙' 탭(없으면 만듦). 다른 칸과 수식은 건드리지 않는다.
  *
  * 스크립트를 바꾼 뒤에는 배포 › 배포 관리 › 연필 › 버전: 새 버전 › 배포 (URL은 그대로)
  */
 
-const VERSION = 2;
+const VERSION = 3;
 
 const TOKEN = '여기에-비밀번호를-적어주세요';
 
@@ -39,6 +39,7 @@ function doPost(e) {
     if (req.action === 'push') return json(push(req.ops || []));
     if (req.action === 'saveRules') return json(saveRules(req.rules || []));
     if (req.action === 'adjustStart') return json(adjustStart(req.items || []));
+    if (req.action === 'replaceAccounts') return json(replaceAccounts(req.accounts || [], req.renames || []));
     return json({ error: '알 수 없는 요청: ' + req.action });
   } catch (err) {
     return json({ error: String(err && err.message ? err.message : err) });
@@ -298,4 +299,62 @@ function adjustStart(items) {
   });
   range.setValues(vals);
   return { results: results };
+}
+
+// ── 자산·부채 목록 통째로 바꾸기 (뱅크샐러드 자산 현황) ──
+
+const ACCOUNT_FIRST = 13; // '가계부 설정' 계좌표 데이터 시작 행
+const ACCOUNT_LAST = 82; // 계좌표 마지막 행 (표 범위 O12:V82)
+
+/**
+ * accounts: [{kind, category, subcategory, name, start, memo, hidden}] → '가계부 설정' P~V열을 이 목록으로 다시 쓴다.
+ * renames: [{from, to}] → '가계부 기록' 입금·출금계좌와 'moneylog 규칙'의 계좌 이름도 바꾼다.
+ */
+function replaceAccounts(accounts, renames) {
+  const rows = ACCOUNT_LAST - ACCOUNT_FIRST + 1;
+  if (accounts.length > rows) throw new Error('계좌는 ' + rows + '개까지 넣을 수 있어요 (지금 ' + accounts.length + '개)');
+  const map = {};
+  renames.forEach(function (r) {
+    if (r.from && r.to) map[r.from] = r.to;
+  });
+
+  // 1) 기록 속 계좌 이름 (H 입금계좌, I 출금계좌)
+  const rec = recordRange();
+  const vals = rec.getValues();
+  let changed = 0;
+  vals.forEach(function (r) {
+    [6, 7].forEach(function (c) {
+      const to = map[str(r[c])];
+      if (to) {
+        r[c] = to;
+        changed++;
+      }
+    });
+  });
+  if (changed) rec.setValues(vals);
+
+  // 2) 규칙 탭의 계좌 이름
+  const rs = ruleSheet(false);
+  if (rs && rs.getLastRow() >= 2) {
+    const rr = rs.getRange(2, 1, rs.getLastRow() - 1, 4);
+    const rv = rr.getValues();
+    rv.forEach(function (r) {
+      if (str(r[0]) === '계좌' && map[str(r[2])]) r[2] = map[str(r[2])];
+    });
+    // 이름이 같아져서 필요 없어진 계좌 규칙(A → A)은 지운다
+    const kept = rv.filter(function (r) {
+      return !(str(r[0]) === '계좌' && str(r[1]) === str(r[2]));
+    });
+    rr.clearContent();
+    if (kept.length) rs.getRange(2, 1, kept.length, 4).setValues(kept);
+  }
+
+  // 3) 계좌표 P~V (O열 정렬 번호는 시트 수식이 다시 매긴다)
+  const sheet = sheetByPrefix('가계부 설정');
+  const out = accounts.map(function (a) {
+    return [a.kind, a.category, a.subcategory || '', a.name, Math.round(Number(a.start) || 0), a.memo || '', a.hidden === true];
+  });
+  while (out.length < rows) out.push(['', '', '', '', '', '', false]);
+  sheet.getRange(ACCOUNT_FIRST, 16, rows, 7).setValues(out);
+  return { ok: true, renamedRecords: changed };
 }
