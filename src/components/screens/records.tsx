@@ -50,8 +50,12 @@ export function RecordsScreen() {
         title={<MonthSwitcher />}
         right={
           <div className="flex items-center gap-1.5">
-            <Link href="/import" aria-label="뱅크샐러드 가져오기" className="grid size-8 place-items-center rounded-full bg-surface text-ink-2">
-              <Import size={16} />
+            <Link
+              href="/import"
+              aria-label="뱅크샐러드 가져오기"
+              className="flex h-8 items-center gap-1 rounded-full bg-ink px-3 text-[12px] font-semibold text-surface"
+            >
+              <Import size={14} /> 가져오기
             </Link>
             <SyncBadge />
           </div>
@@ -77,7 +81,12 @@ export function RecordsScreen() {
               </div>
             </div>
             {groups.length === 0 ? (
-              <p className="py-16 text-center text-[15px] text-ink-3">이 달 내역이 없어요</p>
+              <div className="py-14 text-center">
+                <p className="text-[15px] text-ink-3">이 달 내역이 없어요</p>
+                <Link href="/import" className="mt-3 inline-flex h-10 items-center rounded-full bg-accent-soft px-4 text-[14px] font-semibold text-accent">
+                  뱅크샐러드 내역 가져오기
+                </Link>
+              </div>
             ) : (
               <div className="space-y-3">
                 {groups.map(([date, items]) => {
