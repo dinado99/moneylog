@@ -6,7 +6,7 @@ import { useConnection } from "./connection";
 import { keyOfRow, toSheetRow, fromSheetRow, type SheetRow } from "./record-key";
 import type { Rule } from "./import/to-sheet";
 import type { ResetPlan } from "./import/accounts-reset";
-import { pullSheet, pushSheet, replaceAccounts, saveRules, type Connection, type SheetOp } from "./sheet";
+import { addAccounts, pullSheet, pushSheet, replaceAccounts, saveRules, type Connection, type SheetOp } from "./sheet";
 import type { MoneyRecord, RecordDraft, SheetSettings } from "./types";
 
 export interface SheetData {
@@ -111,11 +111,24 @@ export function useData() {
   return { ...sheet, records, settings: sheet.data?.settings, rules: sheet.data?.rules ?? [] };
 }
 
+export interface NewAccountRow {
+  kind: "자산" | "부채";
+  category: string;
+  subcategory: string;
+  name: string;
+  start: number;
+  memo: string;
+  hidden: boolean;
+}
+
 /**
  * 뱅크샐러드 가져오기 저장: (자산 현황이 있으면) 계좌 목록 통째로 바꾸기 → 기록 추가 → 새 규칙 저장 → 다시 받기.
  * 계좌 이름이 바뀌면 이번에 넣는 기록과 규칙의 계좌 이름도 같이 바꾼다.
  */
-export async function saveImport(c: Connection, input: { drafts: RecordDraft[]; rules: Rule[]; reset?: ResetPlan }) {
+export async function saveImport(
+  c: Connection,
+  input: { drafts: RecordDraft[]; rules: Rule[]; reset?: ResetPlan; newAccounts?: NewAccountRow[] },
+) {
   const rename = new Map((input.reset?.renames ?? []).map((r) => [r.from, r.to]));
   const re = (n?: string) => (n && rename.get(n)) || n;
   if (input.reset) {
@@ -125,6 +138,8 @@ export async function saveImport(c: Connection, input: { drafts: RecordDraft[]; 
       input.reset.renames,
     );
   }
+  // 처음 보는 카드 등은 계좌표에 새로 추가 (목록을 바꾼 뒤라 그 목록에 이어서 들어간다)
+  if (input.newAccounts?.length) await addAccounts(c, input.newAccounts);
   const drafts = input.drafts.map((d) => ({ ...d, inAccount: re(d.inAccount), outAccount: re(d.outAccount) }));
   if (drafts.length) await pushSheet(c, drafts.map((d) => ({ op: "add", row: toSheetRow(d) })));
   const rules = input.rules.map((r) => (r.type === "계좌" ? { ...r, category: re(r.category)! } : r));

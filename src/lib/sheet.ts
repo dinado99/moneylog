@@ -36,7 +36,7 @@ async function call<T>(c: Connection, body: object): Promise<T> {
 }
 
 /** 이 앱이 기대하는 스크립트 버전. 낮으면 새로 복사해 붙여넣으라고 안내한다 */
-export const SCRIPT_VERSION = 3;
+export const SCRIPT_VERSION = 4;
 
 export async function pullSheet(c: Connection) {
   const d = await call<{ version?: number; records: SheetRow[]; settings: SheetSettings; rules?: Rule[] }>(c, { action: "pull" });
@@ -66,4 +66,11 @@ export async function replaceAccounts(
   renames: { from: string; to: string }[],
 ) {
   return call<{ ok: boolean; renamedRecords: number }>(c, { action: "replaceAccounts", accounts, renames }).catch(outdated);
+}
+
+export async function addAccounts(
+  c: Connection,
+  accounts: { kind: string; category: string; subcategory: string; name: string; start: number; memo: string; hidden: boolean }[],
+) {
+  return call<{ ok: boolean; added: number }>(c, { action: "addAccounts", accounts }).catch(outdated);
 }

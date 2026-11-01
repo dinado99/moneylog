@@ -115,3 +115,10 @@ export function planReset(
   const removed = [...oldByName.keys()].filter((n) => !usedOld.has(n) && !usedNew.has(n));
   return { accounts, renames, removed };
 }
+
+/** 가져오기에서 처음 본 결제수단을 새 계좌로 만들 때의 분류 (카드면 부채 › 신용카드 › 일시불) */
+export function newAccountFor(settings: SheetSettings, name: string) {
+  const card = /카드/.test(name);
+  const row: AssetRow = { side: card ? "부채" : "자산", kind: card ? "카드" : "자유입출금 자산", name, balance: 0 };
+  return { kind: row.side, ...classify(settings, row), name, start: 0, memo: "", hidden: false };
+}

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, ClipboardPaste, FileSpreadsheet, LoaderCircle } from "lucide-react";
 import { useConnection } from "@/lib/connection";
 import { formatNumber, todayString } from "@/lib/format";
-import { MAX_ACCOUNTS, planReset, type ResetPlan } from "@/lib/import/accounts-reset";
+import { MAX_ACCOUNTS, newAccountFor, planReset, type ResetPlan } from "@/lib/import/accounts-reset";
 import { ImportError, parsePastedText, parseSpreadsheetFile, type ImportResult } from "@/lib/import/file";
 import { dedupeKey, makeMapper, type Mapped, type Rule } from "@/lib/import/to-sheet";
 import { SheetError } from "@/lib/sheet";
@@ -15,6 +15,9 @@ import { RecordRow } from "../record-row";
 import { RecordSheet } from "../record-sheet";
 import { Sheet } from "../sheet";
 import { BackHeader, Button, Card } from "../ui";
+
+/** 결제수단 연결 선택: 새 계좌로 추가 */
+const NEW = "__new__";
 
 interface Item {
   key: number;
@@ -33,6 +36,8 @@ export function ImportScreen() {
   const [applyReset, setApplyReset] = useState(true);
   const [skipped, setSkipped] = useState(0);
   const [newRules, setNewRules] = useState<Rule[]>([]);
+  // 시트 계좌와 못 맞춘 결제수단 → 선택 (NEW = 새 계좌로 추가, "" = 미정, 그 외 = 기존 계좌 이름)
+  const [choices, setChoices] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
@@ -51,15 +56,19 @@ export function ImportScreen() {
       const map = makeMapper(settings, records, rules);
       const existing = new Map<string, number>();
       for (const r of records) existing.set(dedupeKey(r), (existing.get(dedupeKey(r)) ?? 0) + 1);
-      setItems(
-        txns.rows.map((row, key) => {
-          const m = map(row);
-          const k = dedupeKey(m.draft);
-          const left = existing.get(k) ?? 0;
-          if (left) existing.set(k, left - 1);
-          return { key, m, draft: m.draft, dup: left > 0, selected: left === 0 };
-        }),
-      );
+      let list: Item[] = txns.rows.map((row, key) => {
+        const m = map(row);
+        const k = dedupeKey(m.draft);
+        const left = existing.get(k) ?? 0;
+        if (left) existing.set(k, left - 1);
+        return { key, m, draft: m.draft, dup: left > 0, selected: left === 0 };
+      });
+      // 시트에 없는 결제수단: 카드는 카드 이름 그대로 부채 계좌로 새로 추가, 나머지는 골라 달라고 한다
+      const first: Record<string, string> = {};
+      for (const it of list) if (it.m.needsAccount && it.m.rawAccount) first[it.m.rawAccount] = /카드/.test(it.m.rawAccount) ? NEW : "";
+      for (const [raw, choice] of Object.entries(first)) if (choice) list = assign(list, raw, raw);
+      setItems(list);
+      setChoices(first);
       setReset(assetRows.length ? planReset(settings, records, assetRows, map.account, todayString()) : null);
       setApplyReset(true);
       setSkipped(txns.skipped);
@@ -76,18 +85,14 @@ export function ImportScreen() {
     setNewRules((list) => [...list.filter((r) => !(r.type === rule.type && r.source === rule.source)), rule]);
   }
 
-  /** 같은 결제수단 이름을 쓰는 내역 전부에 계좌를 지정하고 규칙으로 기억 */
-  function linkAccount(raw: string, account: string) {
-    remember({ type: "계좌", source: raw, category: account, subcategory: "" });
-    setItems((list) =>
-      list!.map((it) => {
-        if (it.m.rawAccount !== raw) return it;
-        const d = { ...it.draft };
-        if (d.kind === "수입" || (d.kind === "이동" && it.m.raw.incoming)) d.inAccount = account;
-        else d.outAccount = account;
-        return { ...it, draft: d, m: { ...it.m, needsAccount: false } };
-      }),
-    );
+  /** 결제수단 선택을 바꾸면 그 이름을 쓰는 내역 전부에 반영. 기존 계좌로 연결하면 규칙으로 기억 */
+  function choose(raw: string, choice: string) {
+    setChoices((c) => ({ ...c, [raw]: choice }));
+    setNewRules((list) => {
+      const rest = list.filter((r) => !(r.type === "계좌" && r.source === raw));
+      return choice && choice !== NEW ? [...rest, { type: "계좌", source: raw, category: choice, subcategory: "" }] : rest;
+    });
+    setItems((list) => assign(list!, raw, choice === NEW ? raw : choice || undefined));
   }
 
   async function save() {
@@ -98,10 +103,16 @@ export function ImportScreen() {
       if (reset && applyReset && reset.accounts.length > MAX_ACCOUNTS) {
         throw new SheetError(`시트 계좌표에는 ${MAX_ACCOUNTS}개까지 들어가요. 지금 ${reset.accounts.length}개예요.`);
       }
-      await saveImport(conn, { drafts: items.filter((i) => i.selected).map((i) => i.draft), rules: newRules, reset: reset && applyReset ? reset : undefined });
+      const selectedDrafts = items.filter((i) => i.selected).map((i) => i.draft);
+      const used = new Set(selectedDrafts.flatMap((d) => [d.inAccount, d.outAccount]));
+      const newAccounts = Object.entries(choices)
+        .filter(([raw, c]) => c === NEW && used.has(raw))
+        .map(([raw]) => newAccountFor(settings, raw));
+      await saveImport(conn, { drafts: selectedDrafts, rules: newRules, reset: reset && applyReset ? reset : undefined, newAccounts });
       // 탭을 오가도 화면 상태가 남으므로 처음 화면으로 되돌려 둔다
       setItems(null);
       setReset(null);
+      setChoices({});
       router.push("/");
     } catch (e) {
       setError(e instanceof SheetError ? e.message : "저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
@@ -174,7 +185,7 @@ export function ImportScreen() {
 
   const selected = items.filter((i) => i.selected);
   const needCat = selected.filter((i) => i.draft.kind !== "이동" && !i.draft.category).length;
-  const unlinked = [...new Set(items.filter((i) => i.m.needsAccount && i.m.rawAccount).map((i) => i.m.rawAccount!))];
+  const unlinked = Object.keys(choices);
   const resetCount = reset && applyReset ? reset.accounts.length : 0;
   const editingItem = items.find((i) => i.key === editing);
 
@@ -201,16 +212,25 @@ export function ImportScreen() {
       {unlinked.length > 0 && (
         <Card className="mb-3 p-5">
           <p className="text-[15px] font-semibold">결제수단 연결</p>
-          <p className="mt-1 text-[13px] text-ink-3">뱅크샐러드 이름을 시트 계좌로 연결하면 다음부터 자동이에요.</p>
+          <p className="mt-1 text-[13px] leading-relaxed text-ink-3">
+            시트에 없는 결제수단이에요. 카드는 카드 이름 그대로 부채(💳 신용카드 › 일시불) 계좌로 새로 추가해요. 기존 계좌로 연결하면 다음부터 자동이에요.
+          </p>
           <div className="mt-3 space-y-2">
             {unlinked.map((raw) => (
               <div key={raw} className="flex items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-[14px]">{raw}</span>
                 <span className="text-ink-3">→</span>
-                <select defaultValue="" onChange={(e) => e.target.value && linkAccount(raw, e.target.value)} className="h-10 w-36 shrink-0 rounded-xl bg-surface-2 px-3 text-[14px] outline-none">
+                <select
+                  value={choices[raw]}
+                  onChange={(e) => choose(raw, e.target.value)}
+                  className={`h-10 w-40 shrink-0 rounded-xl px-3 text-[14px] outline-none ${choices[raw] ? "bg-surface-2" : "bg-danger/10 text-danger"}`}
+                >
                   <option value="">계좌 선택</option>
+                  <option value={NEW}>＋ 새 {/카드/.test(raw) ? "카드" : "계좌"}로 추가</option>
                   {accountNames.map((n) => (
-                    <option key={n}>{n}</option>
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -312,6 +332,17 @@ export function ImportScreen() {
       />
     </>
   );
+}
+
+/** raw 결제수단을 쓰는 내역의 계좌를 account로 (수입·들어온 이체는 입금계좌, 나머지는 출금계좌) */
+function assign(list: Item[], raw: string, account: string | undefined): Item[] {
+  return list.map((it) => {
+    if (it.m.rawAccount !== raw) return it;
+    const d = { ...it.draft };
+    if (d.kind === "수입" || (d.kind === "이동" && it.m.raw.incoming)) d.inAccount = account;
+    else d.outAccount = account;
+    return { ...it, draft: d };
+  });
 }
 
 function Check3({ on, onClick }: { on: boolean; onClick: () => void }) {

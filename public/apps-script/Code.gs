@@ -6,12 +6,13 @@
  *       › 머니로그 앱 설정에 URL과 같은 비밀번호 입력
  *
  * 이 스크립트가 쓰는 곳: '가계부 기록' B~I열(날짜~출금계좌), '가계부 설정' 계좌표 P~V열(뱅크샐러드 자산 현황으로
- * 바꿀 때만, O열 정렬 수식은 그대로), 'moneylog 규칙' 탭(없으면 만듦). 다른 칸과 수식은 건드리지 않는다.
+ * 바꾸거나 새 카드를 추가할 때만, O열 정렬 수식은 그대로), 'moneylog 규칙' 탭(없으면 만듦).
+ * 다른 칸과 수식은 건드리지 않는다.
  *
  * 스크립트를 바꾼 뒤에는 배포 › 배포 관리 › 연필 › 버전: 새 버전 › 배포 (URL은 그대로)
  */
 
-const VERSION = 3;
+const VERSION = 4;
 
 const TOKEN = '여기에-비밀번호를-적어주세요';
 
@@ -40,6 +41,7 @@ function doPost(e) {
     if (req.action === 'saveRules') return json(saveRules(req.rules || []));
     if (req.action === 'adjustStart') return json(adjustStart(req.items || []));
     if (req.action === 'replaceAccounts') return json(replaceAccounts(req.accounts || [], req.renames || []));
+    if (req.action === 'addAccounts') return json(addAccounts(req.accounts || []));
     return json({ error: '알 수 없는 요청: ' + req.action });
   } catch (err) {
     return json({ error: String(err && err.message ? err.message : err) });
@@ -357,4 +359,27 @@ function replaceAccounts(accounts, renames) {
   while (out.length < rows) out.push(['', '', '', '', '', '', false]);
   sheet.getRange(ACCOUNT_FIRST, 16, rows, 7).setValues(out);
   return { ok: true, renamedRecords: changed };
+}
+
+/** 새 계좌(예: 가져오기에서 처음 본 카드)를 계좌표 빈 줄에 추가한다. 이름이 이미 있으면 건너뛴다. */
+function addAccounts(accounts) {
+  const sheet = sheetByPrefix('가계부 설정');
+  const rows = ACCOUNT_LAST - ACCOUNT_FIRST + 1;
+  const range = sheet.getRange(ACCOUNT_FIRST, 16, rows, 7); // P..V
+  const vals = range.getValues();
+  let added = 0;
+  accounts.forEach(function (a) {
+    const exists = vals.some(function (v) {
+      return str(v[3]) === a.name;
+    });
+    if (exists) return;
+    const i = vals.findIndex(function (v) {
+      return !str(v[0]) && !str(v[3]);
+    });
+    if (i < 0) throw new Error('계좌표가 꽉 찼어요 (' + rows + '개)');
+    vals[i] = [a.kind, a.category, a.subcategory || '', a.name, Math.round(Number(a.start) || 0), a.memo || '', a.hidden === true];
+    added++;
+  });
+  if (added) range.setValues(vals);
+  return { ok: true, added: added };
 }
