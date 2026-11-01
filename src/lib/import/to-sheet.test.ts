@@ -92,4 +92,16 @@ describe("계좌 이름 맞추기", () => {
     expect(map.account("네이버 현대카드")).toBe("현대카드");
     expect(map.account("삼성증권 CMA")).toBe(undefined);
   });
+
+  it("내역에서는 카드사 이름만 같은 카드는 다른 카드로 (새 부채 계좌 후보)", () => {
+    const map = makeMapper(settings, [], []);
+    const [m] = parseTable(
+      parseDelimited("날짜\t시간\t타입\t대분류\t소분류\t내용\t금액\t화폐\t결제수단\t메모\n2026-10-30\t12:00\t지출\t식비\t한식\t점심\t-9000\tKRW\t신세계 삼성카드 taptap\t"),
+    )!.rows.map(map);
+    expect(m.needsAccount).toBe(true);
+    const [n] = parseTable(
+      parseDelimited("날짜\t시간\t타입\t대분류\t소분류\t내용\t금액\t화폐\t결제수단\t메모\n2026-10-30\t12:00\t지출\t식비\t한식\t점심\t-9000\tKRW\t네이버 현대카드\t"),
+    )!.rows.map(map);
+    expect([n.draft.outAccount, n.guessedAccount]).toEqual(["현대카드", true]);
+  });
 });

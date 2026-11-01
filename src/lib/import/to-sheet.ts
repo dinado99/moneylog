@@ -96,6 +96,8 @@ export interface Mapped {
   how: "규칙" | "예전 기록" | "자동" | "미분류";
   needsCategory: boolean;
   needsAccount: boolean;
+  /** 규칙·같은 이름이 아니라 비슷한 이름으로 짐작해 맞춘 계좌 (확인 화면에서 보여 주고 바꿀 수 있게) */
+  guessedAccount: boolean;
   /** 원래 결제수단 이름 (계좌 규칙 저장용) */
   rawAccount?: string;
   raw: BankRow;
@@ -127,10 +129,19 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
     return { category: c.name, subcategory: sub && c.subs.some((s) => s.name === sub) ? sub : undefined };
   }
 
-  function account(raw?: string): string | undefined {
+  /** 규칙이나 똑같은 이름으로 확실히 맞는 계좌 */
+  function sureAccount(raw?: string): string | undefined {
     if (!raw) return undefined;
     if (accountRules.has(raw)) return accountRules.get(raw);
     if (accounts.includes(raw)) return raw;
+    return undefined;
+  }
+
+  /** brand: 카드사 이름만 같아도 맞추기 (현황으로 예전 계좌를 찾을 때만. 내역에서는 다른 카드일 때가 많아 새 카드로) */
+  function account(raw?: string, brandMatch = true): string | undefined {
+    if (!raw) return undefined;
+    const sure = sureAccount(raw);
+    if (sure) return sure;
     // "신세계이마트 삼성카드 SFC 7" ↔ "삼성SFC카드": 계좌 이름(카드 뺀)의 글자가 순서대로 다 들어 있으면 같은 걸로 본다
     // 반대로 짧은 이름("삼성카드")이 계좌 이름("삼성SFC카드") 안에 순서대로 들어 있어도 같은 걸로 본다
     const target = norm(raw);
@@ -158,7 +169,7 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
     }
     // 마지막으로 카드는 카드사 이름이 같은 카드가 하나뿐이면 같은 것 ("신세계이마트 삼성카드" ↔ "삼성SFC카드").
     // 통장·증권은 같은 은행에 여러 개일 수 있어 이렇게 맞추지 않는다
-    const brand = /카드/.test(raw) && BRANDS.find((b) => target.includes(b));
+    const brand = brandMatch && /카드/.test(raw) && BRANDS.find((b) => target.includes(b));
     if (brand) {
       const hits = accounts.filter((a) => /카드/.test(a) && norm(a).includes(brand));
       if (hits.length === 1) return hits[0];
@@ -217,8 +228,8 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
 
     // 결제수단: 지출은 출금계좌, 수입은 입금계좌, 이동은 출금계좌 + (카드대금·내계좌이체면 내용으로) 입금계좌
     // 이체가 들어온 것(+)이면 결제수단이 입금계좌, 내용(상대 계좌)이 출금계좌
-    const acc = account(row.method);
-    const other = kind === "이동" ? account(content) : undefined;
+    const acc = account(row.method, false);
+    const other = kind === "이동" ? account(content, false) : undefined;
     const draft: RecordDraft = {
       date: row.date,
       kind,
@@ -234,12 +245,13 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
       how,
       needsCategory: kind !== "이동" && !draft.category,
       needsAccount: !!row.method && !acc,
+      guessedAccount: !!acc && !sureAccount(row.method),
       rawAccount: row.method,
       raw: row,
     };
   }
 
-  return Object.assign(map, { account });
+  return Object.assign(map, { account: (raw?: string) => account(raw) });
 }
 
 /** 중복 판단: 날짜·구분·금액·내용 (분류·계좌가 달라도 같은 거래) */

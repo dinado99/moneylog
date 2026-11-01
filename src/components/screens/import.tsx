@@ -55,41 +55,72 @@ export function ImportScreen() {
     return planReset(settings, [...records, ...drafts], assets.rows, assets.match, asOf);
   }, [assets, settings, records, items, asOf]);
 
-  const accountNames = useMemo(() => [...new Set((settings?.accounts ?? []).filter((a) => !a.hidden).map((a) => a.name))], [settings]);
+  // 결제수단을 고를 수 있는 계좌 (현황으로 목록을 바꾸면 바뀐 목록)
+  const [accountNames, setAccountNames] = useState<string[]>([]);
+  const [parsed, setParsed] = useState<ImportResult | null>(null);
 
   async function load(parse: () => Promise<ImportResult>) {
     if (!settings || !records) return;
     setBusy("내역을 정리하고 있어요");
     setError(null);
     try {
-      const { txns, assets: assetRows } = await parse();
-      const map = makeMapper(settings, records, rules);
-      const existing = new Map<string, number>();
-      for (const r of records) existing.set(dedupeKey(r), (existing.get(dedupeKey(r)) ?? 0) + 1);
-      let list: Item[] = txns.rows.map((row, key) => {
-        const m = map(row);
-        const k = dedupeKey(m.draft);
-        const left = existing.get(k) ?? 0;
-        if (left) existing.set(k, left - 1);
-        return { key, m, draft: m.draft, dup: left > 0, selected: left === 0 };
-      });
-      // 시트에 없는 결제수단: 카드는 카드 이름 그대로 부채 계좌로 새로 추가, 나머지는 골라 달라고 한다
-      const first: Record<string, string> = {};
-      for (const it of list) if (it.m.needsAccount && it.m.rawAccount) first[it.m.rawAccount] = /카드/.test(it.m.rawAccount) ? NEW : "";
-      for (const [raw, choice] of Object.entries(first)) if (choice) list = assign(list, raw, raw);
-      setItems(list);
-      setChoices(first);
-      setAssets(assetRows.length ? { rows: assetRows, match: map.account } : null);
-      setAsOf(todayString());
+      const result = await parse();
+      setParsed(result);
+      build(result, true);
       setApplyReset(true);
-      setSkipped(txns.skipped);
-      setNewRules([]);
+      setAsOf(todayString());
     } catch (e) {
       console.error(e);
       setError(e instanceof ImportError ? e.message : "읽지 못했어요. 파일이나 붙여넣은 내용을 확인해 주세요.");
     } finally {
       setBusy(null);
     }
+  }
+
+  /**
+   * 읽은 내용 → 확인 화면. 자산 현황으로 계좌 목록을 바꾸면 내역의 결제수단도 바뀐 목록에 맞춘다
+   * (목록에서 빠질 예전 계좌에 붙으면 그 카드가 잔고에서 사라지니까).
+   */
+  function build({ txns, assets: assetRows }: ImportResult, withReset: boolean) {
+    if (!settings || !records) return;
+    const oldMap = makeMapper(settings, records, rules);
+    let map = oldMap;
+    let names = [...new Set(settings.accounts.filter((a) => !a.hidden).map((a) => a.name))];
+    if (assetRows.length && withReset) {
+      const plan = planReset(settings, records, assetRows, oldMap.account, todayString());
+      const rename = new Map(plan.renames.map((x) => [x.from, x.to]));
+      names = plan.accounts.map((a) => a.name);
+      const after = { ...settings, accounts: plan.accounts.map((a, sort) => ({ ...a, sort })) };
+      const kept = rules
+        .map((x) => (x.type === "계좌" ? { ...x, category: rename.get(x.category) ?? x.category } : x))
+        .filter((x) => x.type !== "계좌" || names.includes(x.category));
+      map = makeMapper(after, records, kept);
+    }
+    const existing = new Map<string, number>();
+    for (const r of records) existing.set(dedupeKey(r), (existing.get(dedupeKey(r)) ?? 0) + 1);
+    let list: Item[] = txns.rows.map((row, key) => {
+      const m = map(row);
+      const k = dedupeKey(m.draft);
+      const left = existing.get(k) ?? 0;
+      if (left) existing.set(k, left - 1);
+      return { key, m, draft: m.draft, dup: left > 0, selected: left === 0 };
+    });
+    // 시트에 없는 결제수단: 카드는 카드 이름 그대로 부채 계좌로 새로 추가, 나머지는 골라 달라고 한다.
+    // 비슷한 이름으로 짐작해 맞춘 것도 보여 줘서 다른 카드면 새 카드로 바꿀 수 있게 한다
+    const first: Record<string, string> = {};
+    for (const it of list) {
+      const raw = it.m.rawAccount;
+      if (!raw || raw in first) continue;
+      if (it.m.needsAccount) first[raw] = /카드/.test(raw) ? NEW : "";
+      else if (it.m.guessedAccount) first[raw] = (it.draft.kind === "수입" || (it.draft.kind === "이동" && it.m.raw.incoming) ? it.draft.inAccount : it.draft.outAccount) ?? "";
+    }
+    for (const [raw, choice] of Object.entries(first)) if (choice === NEW) list = assign(list, raw, raw);
+    setItems(list);
+    setChoices(first);
+    setAccountNames(names);
+    setAssets(assetRows.length ? { rows: assetRows, match: oldMap.account } : null);
+    setSkipped(txns.skipped);
+    setNewRules([]);
   }
 
   function remember(rule: Rule) {
@@ -116,12 +147,17 @@ export function ImportScreen() {
       }
       const selectedDrafts = items.filter((i) => i.selected).map((i) => i.draft);
       const used = new Set(selectedDrafts.flatMap((d) => [d.inAccount, d.outAccount]));
+      // 짐작한 계좌를 그대로 둔 것도 맞다고 확인한 거니 규칙으로 기억
+      const confirmed: Rule[] = Object.entries(choices)
+        .filter(([raw, c]) => c && c !== NEW && used.has(c) && items.some((i) => i.selected && i.m.rawAccount === raw))
+        .map(([raw, c]) => ({ type: "계좌", source: raw, category: c, subcategory: "" }));
+      const rulesToSave = [...newRules.filter((x) => !(x.type === "계좌" && confirmed.some((y) => y.source === x.source))), ...confirmed];
       const newAccounts = Object.entries(choices)
         .filter(([raw, c]) => c === NEW && used.has(raw))
         .map(([raw]) => newAccountFor(settings, raw));
       await saveImport(conn, {
         drafts: selectedDrafts,
-        rules: newRules,
+        rules: rulesToSave,
         reset: reset && applyReset ? reset : undefined,
         newAccounts,
         accounts: settings.accounts,
@@ -231,7 +267,8 @@ export function ImportScreen() {
         <Card className="mb-3 p-5">
           <p className="text-[15px] font-semibold">결제수단 연결</p>
           <p className="mt-1 text-[13px] leading-relaxed text-ink-3">
-            시트에 없는 결제수단이에요. 카드는 카드 이름 그대로 부채(💳 신용카드 › 일시불) 계좌로 새로 추가해요. 기존 계좌로 연결하면 다음부터 자동이에요.
+            시트 계좌와 이름이 다른 결제수단이에요. 처음 보는 카드는 카드 이름 그대로 부채(💳 신용카드 › 일시불) 계좌로 새로 추가하고, 비슷한 이름은 짐작해서 연결해 뒀어요. 다른 카드면
+            &apos;새 카드로 추가&apos;로 바꿔 주세요. 저장하면 다음부터 자동이에요.
           </p>
           <div className="mt-3 space-y-2">
             {unlinked.map((raw) => (
@@ -266,7 +303,13 @@ export function ImportScreen() {
                 시트 &apos;가계부 설정&apos;의 계좌 목록을 아래 {reset.accounts.length}개로 통째로 바꾸고, 잔액이 뱅크샐러드 금액이 되게 시작금액을 맞춰요.
               </span>
             </span>
-            <Check3 on={applyReset} onClick={() => setApplyReset(!applyReset)} />
+            <Check3
+              on={applyReset}
+              onClick={() => {
+                setApplyReset(!applyReset);
+                if (parsed) build(parsed, !applyReset);
+              }}
+            />
           </div>
           {applyReset && (
             <label className="mx-5 my-2 flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3">
