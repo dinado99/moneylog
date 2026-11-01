@@ -10,6 +10,7 @@ import { ImportError, parsePastedText, parseSpreadsheetFile, type ImportResult }
 import { dedupeKey, makeMapper, type Mapped, type Rule } from "@/lib/import/to-sheet";
 import { SheetError } from "@/lib/sheet";
 import { saveImport, useData } from "@/lib/store";
+import type { AssetRow } from "@/lib/import/assets";
 import type { RecordDraft } from "@/lib/types";
 import { RecordRow } from "../record-row";
 import { RecordSheet } from "../record-sheet";
@@ -32,7 +33,9 @@ export function ImportScreen() {
   const conn = useConnection()!;
   const { records, settings, rules } = useData();
   const [items, setItems] = useState<Item[] | null>(null);
-  const [reset, setReset] = useState<ResetPlan | null>(null);
+  // 자산 현황 표 + 예전 계좌 찾기 (저장할 내역·기준일이 바뀌면 시작금액을 다시 계산)
+  const [assets, setAssets] = useState<{ rows: AssetRow[]; match: (name: string) => string | undefined } | null>(null);
+  const [asOf, setAsOf] = useState(todayString);
   const [applyReset, setApplyReset] = useState(true);
   const [skipped, setSkipped] = useState(0);
   const [newRules, setNewRules] = useState<Rule[]>([]);
@@ -44,6 +47,13 @@ export function ImportScreen() {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [paste, setPaste] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const reset: ResetPlan | null = useMemo(() => {
+    if (!assets || !settings || !records) return null;
+    // 이번에 같이 넣는 기록도 기준일 이전이면 이미 현황 금액에 들어 있다
+    const drafts = (items ?? []).filter((i) => i.selected).map((i) => i.draft);
+    return planReset(settings, [...records, ...drafts], assets.rows, assets.match, asOf);
+  }, [assets, settings, records, items, asOf]);
 
   const accountNames = useMemo(() => [...new Set((settings?.accounts ?? []).filter((a) => !a.hidden).map((a) => a.name))], [settings]);
 
@@ -69,7 +79,8 @@ export function ImportScreen() {
       for (const [raw, choice] of Object.entries(first)) if (choice) list = assign(list, raw, raw);
       setItems(list);
       setChoices(first);
-      setReset(assetRows.length ? planReset(settings, records, assetRows, map.account, todayString()) : null);
+      setAssets(assetRows.length ? { rows: assetRows, match: map.account } : null);
+      setAsOf(todayString());
       setApplyReset(true);
       setSkipped(txns.skipped);
       setNewRules([]);
@@ -108,10 +119,16 @@ export function ImportScreen() {
       const newAccounts = Object.entries(choices)
         .filter(([raw, c]) => c === NEW && used.has(raw))
         .map(([raw]) => newAccountFor(settings, raw));
-      await saveImport(conn, { drafts: selectedDrafts, rules: newRules, reset: reset && applyReset ? reset : undefined, newAccounts });
+      await saveImport(conn, {
+        drafts: selectedDrafts,
+        rules: newRules,
+        reset: reset && applyReset ? reset : undefined,
+        newAccounts,
+        accounts: settings.accounts,
+      });
       // 탭을 오가도 화면 상태가 남으므로 처음 화면으로 되돌려 둔다
       setItems(null);
-      setReset(null);
+      setAssets(null);
       setChoices({});
       router.push("/");
     } catch (e) {
@@ -144,6 +161,7 @@ export function ImportScreen() {
           <p>· 저장 전에 확인하고 고칠 수 있어요. 고친 분류·계좌는 시트 &apos;moneylog 규칙&apos; 탭에 저장돼서 다음부터 자동이에요.</p>
           <p>· 시트에 이미 있는 내역(날짜·금액·내용이 같은 것)은 빼둬요.</p>
           <p>· 자산·부채 현황을 넣으면 시트 &apos;가계부 설정&apos;의 계좌 목록을 뱅크샐러드 이름·금액 그대로 통째로 바꿔요. 예전 계좌 이름을 쓴 기록도 새 이름으로 바꿔요.</p>
+          <p>· 현황 금액은 잔액 기준일(기본 오늘)까지 쓴 내역이 반영된 걸로 봐요. 그날 이전·당일 내역을 나중에 넣거나 고쳐도 시작금액을 알아서 맞춰서 잔고가 두 번 빠지지 않아요.</p>
         </div>
         <input
           ref={fileInput}
@@ -250,6 +268,21 @@ export function ImportScreen() {
             </span>
             <Check3 on={applyReset} onClick={() => setApplyReset(!applyReset)} />
           </div>
+          {applyReset && (
+            <label className="mx-5 my-2 flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3">
+              <span className="min-w-0 flex-1 text-[13px] leading-snug text-ink-2">
+                잔액 기준일
+                <span className="block text-[12px] text-ink-3">이 날까지 쓴 내역은 이미 금액에 들어 있어요. 나중에 넣어도 잔고가 두 번 빠지지 않아요.</span>
+              </span>
+              <input
+                type="date"
+                value={asOf}
+                max={todayString()}
+                onChange={(e) => e.target.value && setAsOf(e.target.value)}
+                className="num h-10 shrink-0 rounded-xl bg-surface px-3 text-[14px] outline-none"
+              />
+            </label>
+          )}
           {(["자산", "부채"] as const).map((side) => {
             const list = reset.accounts.filter((a) => a.kind === side);
             if (!list.length) return null;

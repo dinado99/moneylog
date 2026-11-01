@@ -74,3 +74,11 @@ export async function addAccounts(
 ) {
   return call<{ ok: boolean; added: number }>(c, { action: "addAccounts", accounts }).catch(outdated);
 }
+
+/** 계좌 시작금액에 delta를 더한다 (이름이 같은 첫 줄) */
+export async function adjustStart(c: Connection, items: { name: string; delta: number }[]) {
+  if (!items.length) return;
+  const { results } = await call<{ results: { ok: boolean; error?: string }[] }>(c, { action: "adjustStart", items }).catch(outdated);
+  const failed = results.find((r) => !r.ok);
+  if (failed) throw new SheetError(failed.error ?? "시작금액을 바꾸지 못했어요");
+}

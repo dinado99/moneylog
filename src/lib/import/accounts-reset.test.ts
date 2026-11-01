@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { balances } from "../analytics";
 import type { MoneyRecord, SheetSettings } from "../types";
-import { planReset } from "./accounts-reset";
+import { asOfOf, compensations, planReset, withAsOf } from "./accounts-reset";
 
 const settings = {
   startYear: 2025,
@@ -52,7 +52,8 @@ describe("뱅크샐러드 현황으로 계좌 목록 바꾸기", () => {
       { from: "현대카드", to: "현대카드 M" },
     ]);
     expect(plan.removed).toEqual(["카카오뱅크"]);
-    expect(plan.accounts[0].memo).toBe("주거래");
+    expect(plan.accounts[0].memo).toBe("주거래 · 잔액기준 2026-11-01");
+    expect(plan.accounts[1].memo).toBe("잔액기준 2026-11-01");
   });
 
   it("시작금액을 맞추면 시트 잔액이 뱅크샐러드 금액과 같아진다", () => {
@@ -64,5 +65,41 @@ describe("뱅크샐러드 현황으로 계좌 목록 바꾸기", () => {
     const accounts = plan.accounts.map((a, i) => ({ ...a, sort: i, subcategory: a.subcategory }));
     const b = Object.fromEntries(balances(accounts, renamed, "2026-11-01").map((a) => [a.name, a.balance]));
     expect(b).toEqual({ "우리 드림하이 통장": 2579815, "청년 주택드림 청약통장": 8825000, "네이버페이 머니": 606, "현대카드 M": 25332 });
+  });
+});
+
+describe("잔액 기준일", () => {
+  const plan = planReset(
+    settings,
+    records,
+    [{ side: "자산", kind: "자유입출금 자산", name: "우리은행", balance: 1000000 }],
+    (n) => n,
+    "2026-11-01",
+  );
+  const accounts = plan.accounts.map((a, i) => ({ ...a, sort: i }));
+
+  it("기준일 이전·당일 기록을 나중에 넣으면 시작금액을 되돌려 잔고가 그대로", () => {
+    const later = [
+      { date: "2026-11-01", kind: "지출" as const, content: "점심", amount: 9000, outAccount: "우리은행" },
+      { date: "2026-11-02", kind: "지출" as const, content: "저녁", amount: 20000, outAccount: "우리은행" },
+    ];
+    const comp = compensations(accounts, later);
+    expect(comp).toEqual([{ name: "우리은행", delta: 9000 }]);
+    const fixed = accounts.map((a) => ({ ...a, start: a.start + (comp.find((c) => c.name === a.name)?.delta ?? 0) }));
+    // 11/1 점심은 현황에 이미 있으니 잔고에 영향 없음, 11/2 저녁만 빠진다
+    expect(balances(fixed, [...records, ...later], "2026-11-02")[0].balance).toBe(1000000 - 20000);
+  });
+
+  it("기준일 이전 기록을 지우면 시작금액을 반대로 되돌린다", () => {
+    const old = { date: "2026-10-31", kind: "지출" as const, content: "택시", amount: 5000, outAccount: "우리은행" };
+    expect(compensations(accounts, [], [old])).toEqual([{ name: "우리은행", delta: -5000 }]);
+    // 금액만 고치면 차이만큼
+    expect(compensations(accounts, [{ ...old, amount: 7000 }], [old])).toEqual([{ name: "우리은행", delta: 2000 }]);
+  });
+
+  it("메모 기준일 읽기·바꾸기", () => {
+    expect(asOfOf("주거래 · 잔액기준 2026-11-01")).toBe("2026-11-01");
+    expect(withAsOf("주거래 · 잔액기준 2026-10-01", "2026-11-01")).toBe("주거래 · 잔액기준 2026-11-01");
+    expect(asOfOf("")).toBeNull();
   });
 });

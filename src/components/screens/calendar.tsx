@@ -177,8 +177,8 @@ export function CalendarScreen() {
         settings={settings}
         initial={editing ?? undefined}
         onClose={() => setEditing(null)}
-        onSave={(d) => updateRecord(conn, editing!, d)}
-        onDelete={() => deleteRecord(conn, editing!)}
+        onSave={(d) => updateRecord(conn, editing!, d, settings?.accounts)}
+        onDelete={() => deleteRecord(conn, editing!, settings?.accounts)}
       />
     </>
   );

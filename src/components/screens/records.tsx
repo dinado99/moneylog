@@ -127,10 +127,10 @@ export function RecordsScreen() {
         initial={editing && editing !== "new" ? editing : undefined}
         onClose={() => setEditing(null)}
         onSave={async (d) => {
-          if (editing && editing !== "new") await updateRecord(conn, editing, d);
-          else await addRecords(conn, [d]);
+          if (editing && editing !== "new") await updateRecord(conn, editing, d, settings?.accounts);
+          else await addRecords(conn, [d], settings?.accounts);
         }}
-        onDelete={editing && editing !== "new" ? () => deleteRecord(conn, editing) : undefined}
+        onDelete={editing && editing !== "new" ? () => deleteRecord(conn, editing, settings?.accounts) : undefined}
       />
     </>
   );

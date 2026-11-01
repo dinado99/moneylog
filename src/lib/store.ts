@@ -5,9 +5,9 @@ import useSWR, { mutate } from "swr";
 import { useConnection } from "./connection";
 import { keyOfRow, toSheetRow, fromSheetRow, type SheetRow } from "./record-key";
 import type { Rule } from "./import/to-sheet";
-import type { ResetPlan } from "./import/accounts-reset";
-import { addAccounts, pullSheet, pushSheet, replaceAccounts, saveRules, type Connection, type SheetOp } from "./sheet";
-import type { MoneyRecord, RecordDraft, SheetSettings } from "./types";
+import { compensations, type ResetPlan } from "./import/accounts-reset";
+import { addAccounts, adjustStart, pullSheet, pushSheet, replaceAccounts, saveRules, type Connection, type SheetOp } from "./sheet";
+import type { Account, MoneyRecord, RecordDraft, SheetSettings } from "./types";
 
 export interface SheetData {
   rows: SheetRow[];
@@ -83,8 +83,13 @@ export function applyOps(rows: SheetRow[], ops: SheetOp[]): SheetRow[] {
   return next.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 }
 
-async function send(c: Connection, ops: SheetOp[]) {
+/**
+ * 기록을 넣고·고치고·지운다. 잔액 기준일이 있는 계좌(뱅크샐러드 현황으로 맞춘 계좌)에
+ * 기준일 이전·당일 기록이 바뀌면 시작금액을 같이 보정해 잔고가 현황 금액 그대로 남게 한다.
+ */
+async function send(c: Connection, ops: SheetOp[], fix?: { accounts: Account[]; added: RecordDraft[]; removed: RecordDraft[] }) {
   await pushSheet(c, ops);
+  if (fix) await adjustStart(c, compensations(fix.accounts, fix.added, fix.removed));
   const key = [...KEY, c.url];
   await mutate<SheetData>(
     key,
@@ -100,9 +105,15 @@ async function send(c: Connection, ops: SheetOp[]) {
   mutate(key);
 }
 
-export const addRecords = (c: Connection, drafts: RecordDraft[]) => send(c, drafts.map((d) => ({ op: "add", row: toSheetRow(d) })));
-export const updateRecord = (c: Connection, r: MoneyRecord, d: RecordDraft) => send(c, [{ op: "update", match: r.key, row: toSheetRow(d) }]);
-export const deleteRecord = (c: Connection, r: MoneyRecord) => send(c, [{ op: "delete", match: r.key }]);
+const fixFor = (accounts: Account[] | undefined, added: RecordDraft[], removed: RecordDraft[]) =>
+  accounts ? { accounts, added, removed } : undefined;
+
+export const addRecords = (c: Connection, drafts: RecordDraft[], accounts?: Account[]) =>
+  send(c, drafts.map((d) => ({ op: "add", row: toSheetRow(d) })), fixFor(accounts, drafts, []));
+export const updateRecord = (c: Connection, r: MoneyRecord, d: RecordDraft, accounts?: Account[]) =>
+  send(c, [{ op: "update", match: r.key, row: toSheetRow(d) }], fixFor(accounts, [d], [r]));
+export const deleteRecord = (c: Connection, r: MoneyRecord, accounts?: Account[]) =>
+  send(c, [{ op: "delete", match: r.key }], fixFor(accounts, [], [r]));
 
 /** 화면에서 쓰는 기록 목록 + 시트 설정 */
 export function useData() {
@@ -127,7 +138,14 @@ export interface NewAccountRow {
  */
 export async function saveImport(
   c: Connection,
-  input: { drafts: RecordDraft[]; rules: Rule[]; reset?: ResetPlan; newAccounts?: NewAccountRow[] },
+  input: {
+    drafts: RecordDraft[];
+    rules: Rule[];
+    reset?: ResetPlan;
+    newAccounts?: NewAccountRow[];
+    /** 지금 시트 계좌 (잔액 기준일 보정용) */
+    accounts?: Account[];
+  },
 ) {
   const rename = new Map((input.reset?.renames ?? []).map((r) => [r.from, r.to]));
   const re = (n?: string) => (n && rename.get(n)) || n;
@@ -142,6 +160,12 @@ export async function saveImport(
   if (input.newAccounts?.length) await addAccounts(c, input.newAccounts);
   const drafts = input.drafts.map((d) => ({ ...d, inAccount: re(d.inAccount), outAccount: re(d.outAccount) }));
   if (drafts.length) await pushSheet(c, drafts.map((d) => ({ op: "add", row: toSheetRow(d) })));
+  // 현황으로 새로 맞춘 계좌는 이번 기록까지 계산에 넣었으니 빼고, 예전에 기준일을 남긴 계좌만 보정
+  if (input.accounts && drafts.length) {
+    const fresh = new Set([...(input.reset?.accounts ?? []).map((a) => a.name), ...(input.newAccounts ?? []).map((a) => a.name)]);
+    const kept = input.reset ? [] : input.accounts.filter((a) => !fresh.has(a.name));
+    await adjustStart(c, compensations(kept, drafts));
+  }
   const rules = input.rules.map((r) => (r.type === "계좌" ? { ...r, category: re(r.category)! } : r));
   if (rules.length) await saveRules(c, rules);
   await mutate([...KEY, c.url]);

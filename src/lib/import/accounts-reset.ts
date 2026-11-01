@@ -1,4 +1,4 @@
-import type { Account, MoneyRecord, SheetSettings } from "../types";
+import type { Account, RecordDraft, SheetSettings } from "../types";
 import type { AssetRow } from "./assets";
 
 /** 시트 '가계부 설정' 계좌표 한 줄 (P 구분 ~ V 숨기기) */
@@ -55,8 +55,48 @@ function classify(settings: SheetSettings, row: AssetRow) {
   return { category: cat?.name ?? "", subcategory: pickSub(cat?.subs ?? [], subRe) };
 }
 
+// ── 잔액 기준일 ──
+// 뱅크샐러드 현황 금액은 그날까지 쓴 내역이 이미 반영된 잔액이다. 계좌 메모에 "잔액기준 YYYY-MM-DD"로 남겨서,
+// 나중에 그날 이전·당일 내역이 들어오면 시작금액을 되돌려 맞춘다 (잔고가 두 번 빠지지 않게).
+
+const AS_OF = /\s*·?\s*잔액기준 (\d{4}-\d{2}-\d{2})/;
+
+export function asOfOf(memo: string): string | null {
+  return memo.match(AS_OF)?.[1] ?? null;
+}
+
+export function withAsOf(memo: string, date: string): string {
+  const base = memo.replace(AS_OF, "").trim();
+  return base ? `${base} · 잔액기준 ${date}` : `잔액기준 ${date}`;
+}
+
+/**
+ * 기준일이 있는 계좌에 기준일 이전·당일 기록을 새로 넣을 때 시작금액 보정값.
+ * 그 기록은 이미 현황 금액에 들어 있으니, 기록이 잔고에 주는 영향만큼 시작금액에서 뺀다.
+ */
+export function compensations(
+  accounts: Account[],
+  drafts: RecordDraft[],
+  /** 지우거나 고치기 전 기록 (빠지는 만큼 되돌린다) */
+  removed: RecordDraft[] = [],
+): { name: string; delta: number }[] {
+  const out = new Map<string, number>();
+  const seen = new Set<string>();
+  for (const a of accounts) {
+    if (seen.has(a.name)) continue;
+    seen.add(a.name);
+    const asOf = asOfOf(a.memo);
+    if (!asOf) continue;
+    const names = new Set([a.name]);
+    const debt = a.kind === "부채";
+    const e = effect(drafts, names, debt, asOf) - effect(removed, names, debt, asOf);
+    if (e) out.set(a.name, -e);
+  }
+  return [...out].map(([name, delta]) => ({ name, delta }));
+}
+
 /** 기록이 계좌 잔액에 주는 영향 (시트 잔고 보고서와 같은 계산) */
-function effect(records: MoneyRecord[], names: Set<string>, debt: boolean, until: string) {
+function effect(records: RecordDraft[], names: Set<string>, debt: boolean, until: string) {
   let n = 0;
   for (const r of records) {
     if (r.date > until) continue;
@@ -69,14 +109,17 @@ function effect(records: MoneyRecord[], names: Set<string>, debt: boolean, until
 /**
  * 뱅크샐러드 자산·부채 현황으로 시트 계좌 목록을 통째로 바꾸는 계획.
  * - 이름은 뱅크샐러드 그대로. 예전 시트 계좌와 같은 것(matchOld)이면 기록 속 이름도 새 이름으로 바꾼다.
- * - 시작금액 = 뱅크샐러드 금액 − (오늘까지 기록의 영향) → 시트 잔액이 뱅크샐러드 금액과 같아진다.
+ * - 시작금액 = 뱅크샐러드 금액 − (기준일까지 기록의 영향) → 시트 잔액이 뱅크샐러드 금액과 같아진다.
+ *   기준일 다음 날부터의 기록은 평소처럼 잔고에 더해진다.
  */
 export function planReset(
   settings: SheetSettings,
-  records: MoneyRecord[],
+  /** 시트 기록 + 이번에 같이 넣는 기록 */
+  records: RecordDraft[],
   rows: AssetRow[],
   matchOld: (name: string) => string | undefined,
-  today: string,
+  /** 현황 금액이 언제까지의 내역을 반영한 것인지 (그날 포함) */
+  asOf: string,
 ): ResetPlan {
   const oldByName = new Map<string, Account>();
   for (const a of settings.accounts) if (!oldByName.has(a.name)) oldByName.set(a.name, a);
@@ -105,8 +148,8 @@ export function planReset(
       category,
       subcategory,
       name,
-      start: row.balance - effect(records, names, debt, today),
-      memo: from ? (oldByName.get(from)?.memo ?? "") : "",
+      start: row.balance - effect(records, names, debt, asOf),
+      memo: withAsOf(from ? (oldByName.get(from)?.memo ?? "") : "", asOf),
       hidden: false,
       balance: row.balance,
       renamedFrom: from && from !== name ? from : undefined,
