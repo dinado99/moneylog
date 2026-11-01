@@ -5,7 +5,13 @@ export interface BankRow {
   date: string;
   time?: string;
   type: TxnType;
+  /**
+   * 지출·수입: 음수면 차감 (지출 −5만 = 엔빵·환불로 돌려받은 돈, 수입 −는 수입 취소).
+   * 이체: 항상 양수, 방향은 incoming
+   */
   amount: number;
+  /** 이체가 결제수단 계좌로 들어온 것인지 (뱅크샐러드 이체 금액이 +) */
+  incoming?: boolean;
   merchant: string;
   /** 원래 대분류 (뱅크샐러드 "카페/간식" 등). 없으면 "" */
   category: string;
@@ -178,7 +184,8 @@ export function parseTable(table: Cell[][], fallbackYear = new Date().getFullYea
     }
 
     let amount: number | null = null;
-    let type: TxnType | null = parseType(get(row, "type"));
+    const explicit = parseType(get(row, "type"));
+    let type: TxnType | null = explicit;
     if (f.withdraw !== undefined || f.deposit !== undefined) {
       const w = parseAmount(get(row, "withdraw")) ?? 0;
       const d = parseAmount(get(row, "deposit")) ?? 0;
@@ -202,7 +209,18 @@ export function parseTable(table: Cell[][], fallbackYear = new Date().getFullYea
       continue;
     }
 
-    amount = Math.abs(Math.round(amount));
+    // 타입 칸이 있고 금액에 부호가 있으면(뱅크샐러드): 지출은 −가 정상, +면 돌려받은 돈 → 지출 차감(음수)
+    let incoming: boolean | undefined;
+    amount = Math.round(amount);
+    if (explicit && signed) {
+      if (type === "expense") amount = -amount;
+      else if (type === "transfer") {
+        incoming = amount > 0;
+        amount = Math.abs(amount);
+      }
+    } else {
+      amount = Math.abs(amount);
+    }
     const timeFromDate = parseTime(get(row, "date"));
     const time = parseTime(get(row, "time")) ?? (timeFromDate !== "00:00" ? timeFromDate : undefined);
     const merchant = str(get(row, "merchant")) || str(get(row, "memo")) || "(내용 없음)";
@@ -214,6 +232,7 @@ export function parseTable(table: Cell[][], fallbackYear = new Date().getFullYea
       time,
       type,
       amount,
+      incoming,
       merchant,
       category: rawCategory(str(get(row, "category"))),
       subcategory: subcategory && subcategory !== "미분류" ? subcategory : undefined,

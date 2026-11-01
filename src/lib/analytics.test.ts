@@ -59,3 +59,16 @@ describe("달력·회계연도", () => {
     expect(fiscalMonths(2026, 3)).toContain("2027-02");
   });
 });
+
+describe("음수 지출 (엔빵)", () => {
+  it("지출 합계에서 빠지고, 계좌에는 들어온 돈으로 잡힌다", () => {
+    const list: RecordDraft[] = [
+      { date: "2025-09-02", kind: "지출", category: "🍽️ 식비", subcategory: "외식비", content: "고깃집", amount: 100000, outAccount: "현대카드" },
+      { date: "2025-09-02", kind: "지출", category: "🍽️ 식비", subcategory: "외식비", content: "엔빵", amount: -50000, outAccount: "우리은행" },
+    ];
+    expect(byCategory(list, "지출")[0].total).toBe(50000);
+    const b = Object.fromEntries(balances(accounts, list).map((a) => [a.name, a.balance]));
+    expect(b["우리은행"]).toBe(193435 + 50000);
+    expect(b["현대카드"]).toBe(127500 + 100000);
+  });
+});

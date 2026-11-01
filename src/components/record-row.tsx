@@ -2,13 +2,15 @@ import type { ReactNode } from "react";
 import { formatNumber, splitEmoji } from "@/lib/format";
 import type { RecordDraft } from "@/lib/types";
 
+/** 지출은 −, 수입은 +. 지출 차감(음수 지출: 엔빵·환불)은 +로 초록, 수입 차감은 −로 */
 export function Amount({ r, className = "" }: { r: Pick<RecordDraft, "kind" | "amount">; className?: string }) {
-  const sign = r.kind === "지출" ? "-" : r.kind === "수입" ? "+" : "";
-  const color = r.kind === "수입" ? "text-income" : r.kind === "이동" ? "text-ink-3" : "text-ink";
+  const refund = r.kind === "지출" && r.amount < 0;
+  const sign = r.kind === "이동" ? "" : (r.kind === "지출") !== r.amount < 0 ? "−" : "+";
+  const color = refund ? "text-[#1a9a5c]" : r.kind === "수입" ? (r.amount < 0 ? "text-danger" : "text-income") : r.kind === "이동" ? "text-ink-3" : "text-ink";
   return (
     <span className={`num font-semibold ${color} ${className}`}>
       {sign}
-      {formatNumber(r.amount)}원
+      {formatNumber(Math.abs(r.amount))}원
     </span>
   );
 }
@@ -18,9 +20,14 @@ export function accountLabel(r: RecordDraft) {
   return r.kind === "수입" ? r.inAccount : r.outAccount;
 }
 
+/** 지출 차감이면 "돌려받음" 표시 */
+export function refundLabel(r: RecordDraft) {
+  return r.kind === "지출" && r.amount < 0 ? "돌려받음" : r.kind === "수입" && r.amount < 0 ? "수입 차감" : null;
+}
+
 export function RecordRow({ r, onClick, leading, note }: { r: RecordDraft; onClick?: () => void; leading?: ReactNode; note?: ReactNode }) {
   const { emoji, label } = splitEmoji(r.category ?? "");
-  const sub = [r.subcategory ?? (r.kind === "이동" ? "이동" : label), accountLabel(r)].filter(Boolean).join(" · ");
+  const sub = [refundLabel(r), r.subcategory ?? (r.kind === "이동" ? "이동" : label), accountLabel(r)].filter(Boolean).join(" · ");
   return (
     <button onClick={onClick} className="flex w-full items-center gap-3 px-5 py-3 text-left active:bg-surface-2">
       {leading}

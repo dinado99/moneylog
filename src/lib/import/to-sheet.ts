@@ -204,7 +204,9 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
     }
 
     // 결제수단: 지출은 출금계좌, 수입은 입금계좌, 이동은 출금계좌 + (카드대금·내계좌이체면 내용으로) 입금계좌
+    // 이체가 들어온 것(+)이면 결제수단이 입금계좌, 내용(상대 계좌)이 출금계좌
     const acc = account(row.method);
+    const other = kind === "이동" ? account(content) : undefined;
     const draft: RecordDraft = {
       date: row.date,
       kind,
@@ -212,8 +214,8 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
       subcategory: cat?.subcategory,
       content,
       amount: row.amount,
-      inAccount: kind === "수입" ? acc : kind === "이동" ? account(content) : undefined,
-      outAccount: kind === "수입" ? undefined : acc,
+      inAccount: kind === "수입" ? acc : kind === "이동" ? (row.incoming ? acc : other) : undefined,
+      outAccount: kind === "수입" ? undefined : kind === "이동" ? (row.incoming ? other : acc) : acc,
     };
     return {
       draft,

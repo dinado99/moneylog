@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { formatNumber, splitEmoji, todayString } from "@/lib/format";
 import type { Kind, RecordDraft, SheetSettings } from "@/lib/types";
 import { Sheet } from "./sheet";
@@ -34,12 +34,17 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
   const [d, setD] = useState<RecordDraft>(() => initial ?? { date: todayString(), kind: "지출", content: "", amount: 0 });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 금액을 지우고 다시 입력할 때도 −를 기억
+  const [minus, setMinus] = useState(() => (initial?.amount ?? 0) < 0);
+  const amountRef = useRef<HTMLInputElement>(null);
   const set = <K extends keyof RecordDraft>(k: K, v: RecordDraft[K]) => setD((p) => ({ ...p, [k]: v }));
 
   const cats = (settings?.categories ?? []).filter((c) => c.kind === d.kind);
   const current = cats.find((c) => c.name === d.category);
   const needsCategory = d.kind !== "이동" && cats.length > 0;
-  const valid = d.amount > 0 && /^\d{4}-\d{2}-\d{2}$/.test(d.date) && (!needsCategory || !!d.category);
+  // 지출·수입은 음수(차감)도 된다. 이동은 양수만
+  const valid = (d.kind === "이동" ? d.amount > 0 : d.amount !== 0) && /^\d{4}-\d{2}-\d{2}$/.test(d.date) && (!needsCategory || !!d.category);
+  const negative = d.amount < 0 || (d.amount === 0 && minus);
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -62,25 +67,62 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
         onChange={(kind) =>
           setD((p) => {
             const keep = (settings?.categories ?? []).some((c) => c.kind === kind && c.name === p.category);
-            return { ...p, kind, category: keep ? p.category : undefined, subcategory: keep ? p.subcategory : undefined };
+            if (kind === "이동") setMinus(false);
+            return {
+              ...p,
+              kind,
+              amount: kind === "이동" ? Math.abs(p.amount) : p.amount,
+              category: keep ? p.category : undefined,
+              subcategory: keep ? p.subcategory : undefined,
+            };
           })
         }
       />
 
       <label className="mt-6 block">
         <span className="text-[13px] text-ink-3">금액</span>
-        <div className="mt-1 flex items-baseline gap-1 border-b border-line pb-2 focus-within:border-ink">
+        <div className="mt-1 flex items-center gap-1 border-b border-line pb-2 focus-within:border-ink">
+          {d.kind !== "이동" && (
+            <button
+              type="button"
+              aria-label="차감(음수)"
+              aria-pressed={negative}
+              onClick={(e) => {
+                e.preventDefault();
+                setMinus(!negative);
+                set("amount", -d.amount);
+                // 누른 뒤 바로 숫자를 칠 수 있게
+                amountRef.current?.focus();
+              }}
+              className={`mr-1 grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[20px] font-bold transition ${
+                negative ? "bg-ink text-surface" : "bg-surface-2 text-ink-3"
+              }`}
+            >
+              −
+            </button>
+          )}
           <input
+            ref={amountRef}
             inputMode="numeric"
             autoFocus={!initial}
             placeholder="0"
-            value={d.amount ? formatNumber(d.amount) : ""}
-            onChange={(e) => set("amount", Number(e.target.value.replace(/\D/g, "").slice(0, 12)) || 0)}
-            className="num w-full bg-transparent text-[30px] font-bold outline-none placeholder:text-line"
+            value={d.amount ? `${negative ? "−" : ""}${formatNumber(Math.abs(d.amount))}` : ""}
+            onChange={(e) => {
+              const n = Number(e.target.value.replace(/\D/g, "").slice(0, 12)) || 0;
+              set("amount", negative ? -n : n);
+            }}
+            className={`num w-full bg-transparent text-[30px] font-bold outline-none placeholder:text-line ${negative ? "text-[#1a9a5c]" : ""}`}
           />
           <span className="text-[20px] font-semibold text-ink-2">원</span>
         </div>
       </label>
+      {negative && d.kind !== "이동" && (
+        <p className="mt-2 text-[12px] leading-relaxed text-ink-3">
+          {d.kind === "지출"
+            ? "지출에서 빼요. 엔빵·환불로 돌려받은 돈을 같은 분류에 넣으면 그만큼 덜 쓴 걸로 계산돼요. 계좌는 돈이 들어온 곳을 고르세요."
+            : "수입에서 빼요. 잘못 들어온 수입이나 수입 취소에 써요."}
+        </p>
+      )}
 
       <Field label="내용">
         <input
@@ -139,7 +181,7 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
           <AccountSelect settings={settings} value={d.inAccount} onChange={(v) => set("inAccount", v)} />
         </Field>
       ) : (
-        <Field label="출금계좌 (결제수단)">
+        <Field label={negative ? "돈이 들어온 계좌" : "출금계좌 (결제수단)"}>
           <AccountSelect settings={settings} value={d.outAccount} onChange={(v) => set("outAccount", v)} />
         </Field>
       )}

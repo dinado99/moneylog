@@ -66,3 +66,21 @@ describe("뱅크샐러드 → 시트 분류·계좌", () => {
     expect(out[2].draft.outAccount).toBe("우리은행");
   });
 });
+
+describe("음수(차감)", () => {
+  it("뱅크샐러드 지출 +금액은 지출 차감, 들어온 이체는 입금계좌로", () => {
+    const text = [
+      "날짜\t시간\t타입\t대분류\t소분류\t내용\t금액\t화폐\t결제수단\t메모",
+      "2026-10-10\t20:00\t지출\t식비\t외식\t고깃집\t-100000\tKRW\t네이버 현대카드\t",
+      "2026-10-10\t21:00\t지출\t식비\t외식\t친구 엔빵\t50000\tKRW\t카카오페이\t",
+      "2026-10-11\t09:00\t이체\t내계좌이체\t미분류\t카카오페이\t30000\tKRW\t우리은행\t",
+    ].join("\n");
+    const out = parseTable(parseDelimited(text))!.rows.map(makeMapper(settings, [], []));
+    expect(out.map((m) => [m.draft.kind, m.draft.amount])).toEqual([
+      ["지출", 100000],
+      ["지출", -50000],
+      ["이동", 30000],
+    ]);
+    expect([out[2].draft.inAccount, out[2].draft.outAccount]).toEqual(["우리은행", "카카오페이"]);
+  });
+});

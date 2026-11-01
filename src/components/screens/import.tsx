@@ -94,7 +94,7 @@ export function ImportScreen() {
       list!.map((it) => {
         if (it.m.rawAccount !== raw) return it;
         const d = { ...it.draft };
-        if (d.kind === "수입") d.inAccount = account;
+        if (d.kind === "수입" || (d.kind === "이동" && it.m.raw.incoming)) d.inAccount = account;
         else d.outAccount = account;
         return { ...it, draft: d, m: { ...it.m, needsAccount: false } };
       }),
