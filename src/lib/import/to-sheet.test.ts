@@ -67,6 +67,38 @@ describe("뱅크샐러드 → 시트 분류·계좌", () => {
   });
 });
 
+describe("시트 설정과 안 맞는 것 표시", () => {
+  const H = "날짜\t시간\t타입\t대분류\t소분류\t내용\t금액\t화폐\t결제수단\t메모\n";
+  const one = (line: string, rules: Parameters<typeof makeMapper>[2] = []) => makeMapper(settings, [], rules)(parseTable(parseDelimited(H + line))!.rows[0]);
+
+  it("뱅크샐러드를 시트 분류·계좌 이름 그대로 맞추면 표시 없음", () => {
+    const m = one("2026-10-22\t12:00\t지출\t식비\t외식비\t점심\t-9000\tKRW\t현대카드\t");
+    expect([m.draft.category, m.draft.subcategory, m.how]).toEqual(["🍽️ 식비", "외식비", "그대로"]);
+    expect(m.mismatch).toEqual({});
+  });
+
+  it("다르면 짐작은 하되 무엇이 안 맞는지 남긴다", () => {
+    const m = one("2026-10-22\t12:00\t지출\t식비\t한식\t점심\t-9000\tKRW\t네이버 현대카드\t");
+    expect(m.draft.category).toBe("🍽️ 식비");
+    expect(m.mismatch).toEqual({ category: "분류 '식비 › 한식' 시트에 없음", account: "결제수단 '네이버 현대카드' 시트에 없음" });
+  });
+
+  it("시트에 같은 이름 계좌가 있으면 예전 규칙보다 그 계좌가 먼저 (띄어쓰기 무시)", () => {
+    const withMoney = { ...settings, accounts: [...settings.accounts, { ...settings.accounts[0], name: "네이버페이 머니" }] };
+    const rules = [{ type: "계좌" as const, source: "네이버페이머니", category: "현대카드", subcategory: "" }];
+    const m = makeMapper(withMoney, [], rules)(parseTable(parseDelimited(H + "2026-10-22\t12:00\t지출\t식비\t외식비\t점심\t-20000\tKRW\t네이버페이머니\t"))!.rows[0]);
+    expect([m.draft.outAccount, m.mismatch]).toEqual(["네이버페이 머니", {}]);
+  });
+
+  it("내가 만든 규칙으로 맞춘 건 맞는 걸로", () => {
+    const m = one("2026-10-22\t12:00\t지출\t식비\t한식\t점심\t-9000\tKRW\t네이버 현대카드\t", [
+      { type: "분류", source: "식비>한식", category: "🍽️ 식비", subcategory: "외식비" },
+      { type: "계좌", source: "네이버 현대카드", category: "현대카드", subcategory: "" },
+    ]);
+    expect(m.mismatch).toEqual({});
+  });
+});
+
 describe("음수(차감)", () => {
   it("뱅크샐러드 지출 +금액은 지출 차감, 들어온 이체는 입금계좌로", () => {
     const text = [

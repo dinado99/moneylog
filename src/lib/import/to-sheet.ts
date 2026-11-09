@@ -93,11 +93,16 @@ const KIND: Record<BankRow["type"], Kind> = { expense: "지출", income: "수입
 export interface Mapped {
   draft: RecordDraft;
   /** 어떻게 분류했는지 (확인 화면 표시용) */
-  how: "규칙" | "예전 기록" | "자동" | "미분류";
+  how: "그대로" | "규칙" | "예전 기록" | "자동" | "미분류";
   needsCategory: boolean;
   needsAccount: boolean;
   /** 규칙·같은 이름이 아니라 비슷한 이름으로 짐작해 맞춘 계좌 (확인 화면에서 보여 주고 바꿀 수 있게) */
   guessedAccount: boolean;
+  /**
+   * 뱅크샐러드 값이 시트 '가계부 설정'과 그대로 맞지 않은 것 (확인 화면에서 빨간색).
+   * 내가 만든 규칙으로 맞춘 건 맞는 걸로 본다.
+   */
+  mismatch: { category?: string; account?: string; counter?: string };
   /** 원래 결제수단 이름 (계좌 규칙 저장용) */
   rawAccount?: string;
   raw: BankRow;
@@ -129,11 +134,20 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
     return { category: c.name, subcategory: sub && c.subs.some((s) => s.name === sub) ? sub : undefined };
   }
 
-  /** 규칙이나 똑같은 이름으로 확실히 맞는 계좌 */
+  // 시트 계좌 이름 (숨긴 계좌도 이름이 같으면 그 계좌)
+  const allNames = [...new Set(settings.accounts.map((a) => a.name))];
+
+  /**
+   * 확실히 맞는 계좌: 시트에 같은 이름(띄어쓰기 무시)이 있으면 무조건 그 계좌, 없을 때만 내가 만든 계좌 규칙.
+   * (예전에 '네이버페이 머니 → 네이버페이' 규칙이 있어도 시트에 '네이버페이 머니'가 있으면 그쪽)
+   */
   function sureAccount(raw?: string): string | undefined {
     if (!raw) return undefined;
-    if (accountRules.has(raw)) return accountRules.get(raw);
-    if (accounts.includes(raw)) return raw;
+    if (allNames.includes(raw)) return raw;
+    const same = allNames.find((a) => norm(a) === norm(raw));
+    if (same) return same;
+    const ruled = accountRules.get(raw);
+    if (ruled && allNames.includes(ruled)) return ruled;
     return undefined;
   }
 
@@ -142,6 +156,7 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
     if (!raw) return undefined;
     const sure = sureAccount(raw);
     if (sure) return sure;
+    if (accountRules.has(raw)) return accountRules.get(raw);
     // "신세계이마트 삼성카드 SFC 7" ↔ "삼성SFC카드": 계좌 이름(카드 뺀)의 글자가 순서대로 다 들어 있으면 같은 걸로 본다
     // 반대로 짧은 이름("삼성카드")이 계좌 이름("삼성SFC카드") 안에 순서대로 들어 있어도 같은 걸로 본다
     const target = norm(raw);
@@ -188,6 +203,14 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
       if (mr) {
         cat = validCategory(kind, mr.category, mr.subcategory);
         if (cat) how = "규칙";
+      }
+      // 뱅크샐러드 분류를 시트 분류 이름 그대로 맞춰 뒀으면 (대분류 같고, 소분류도 있으면 시트에 있는 것) 그대로
+      if (!cat && row.category) {
+        const exact = resolve(kind, row.category, row.subcategory);
+        if (exact && (!row.subcategory || exact.subcategory)) {
+          cat = exact;
+          how = "그대로";
+        }
       }
       if (!cat) {
         const prev = learned.get(`${kind}|${norm(content)}`);
@@ -240,9 +263,16 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
       inAccount: kind === "수입" ? acc : kind === "이동" ? (row.incoming ? acc : other) : undefined,
       outAccount: kind === "수입" ? undefined : kind === "이동" ? (row.incoming ? other : acc) : acc,
     };
+    const mismatch: Mapped["mismatch"] = {};
+    if (kind !== "이동" && how !== "그대로" && how !== "규칙") {
+      mismatch.category = row.category ? `분류 '${[row.category, row.subcategory].filter(Boolean).join(" › ")}' 시트에 없음` : "뱅크샐러드 분류 없음";
+    }
+    if (row.method && !sureAccount(row.method)) mismatch.account = `결제수단 '${row.method}' 시트에 없음`;
+    if (kind === "이동" && content && !sureAccount(content)) mismatch.counter = `${row.incoming ? "보낸" : "받는"} 계좌 '${content}' 시트에 없음`;
     return {
       draft,
       how,
+      mismatch,
       needsCategory: kind !== "이동" && !draft.category,
       needsAccount: !!row.method && !acc,
       guessedAccount: !!acc && !sureAccount(row.method),
