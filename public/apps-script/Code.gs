@@ -12,7 +12,7 @@
  * 스크립트를 바꾼 뒤에는 배포 › 배포 관리 › 연필 › 버전: 새 버전 › 배포 (URL은 그대로)
  */
 
-const VERSION = 4;
+const VERSION = 5;
 
 const TOKEN = '여기에-비밀번호를-적어주세요';
 
@@ -42,6 +42,7 @@ function doPost(e) {
     if (req.action === 'adjustStart') return json(adjustStart(req.items || []));
     if (req.action === 'replaceAccounts') return json(replaceAccounts(req.accounts || [], req.renames || []));
     if (req.action === 'addAccounts') return json(addAccounts(req.accounts || []));
+    if (req.action === 'setMemo') return json(setMemo(str(req.name), str(req.memo)));
     return json({ error: '알 수 없는 요청: ' + req.action });
   } catch (err) {
     return json({ error: String(err && err.message ? err.message : err) });
@@ -382,4 +383,18 @@ function addAccounts(accounts) {
   });
   if (added) range.setValues(vals);
   return { ok: true, added: added };
+}
+
+/** 계좌 메모(U열) 바꾸기 (예: 외화 보유액). 이름이 같은 계좌가 여러 줄이면 첫 줄 */
+function setMemo(name, memo) {
+  const sheet = sheetByPrefix('가계부 설정');
+  const rows = ACCOUNT_LAST - ACCOUNT_FIRST + 1;
+  const names = sheet.getRange(ACCOUNT_FIRST, 19, rows, 1).getValues(); // S 이름
+  for (let i = 0; i < rows; i++) {
+    if (str(names[i][0]) === name) {
+      sheet.getRange(ACCOUNT_FIRST + i, 21).setValue(memo); // U 메모
+      return { ok: true };
+    }
+  }
+  throw new Error(name + ' 계좌를 찾지 못했어요');
 }

@@ -6,7 +6,7 @@ import { useConnection } from "./connection";
 import { keyOfRow, toSheetRow, fromSheetRow, type SheetRow } from "./record-key";
 import type { Rule } from "./import/to-sheet";
 import { compensations, type ResetPlan } from "./import/accounts-reset";
-import { addAccounts, adjustStart, pullSheet, pushSheet, replaceAccounts, saveRules, type Connection, type SheetOp } from "./sheet";
+import { addAccounts, adjustStart, setMemo, pullSheet, pushSheet, replaceAccounts, saveRules, type Connection, type SheetOp } from "./sheet";
 import type { Account, MoneyRecord, RecordDraft, SheetSettings } from "./types";
 
 export interface SheetData {
@@ -173,5 +173,11 @@ export async function saveImport(
 
 export async function removeRule(c: Connection, rule: Pick<Rule, "type" | "source">) {
   await saveRules(c, [{ type: rule.type, source: rule.source, remove: true }]);
+  await mutate([...KEY, c.url]);
+}
+
+/** 계좌 메모 저장 (외화 보유액 등) */
+export async function saveMemo(c: Connection, name: string, memo: string) {
+  await setMemo(c, name, memo);
   await mutate([...KEY, c.url]);
 }

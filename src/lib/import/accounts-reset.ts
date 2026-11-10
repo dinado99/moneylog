@@ -66,7 +66,7 @@ export function asOfOf(memo: string): string | null {
 }
 
 export function withAsOf(memo: string, date: string): string {
-  const base = memo.replace(AS_OF, "").trim();
+  const base = memo.replace(AS_OF, "").trim().replace(/^·\s*/, "");
   return base ? `${base} · 잔액기준 ${date}` : `잔액기준 ${date}`;
 }
 

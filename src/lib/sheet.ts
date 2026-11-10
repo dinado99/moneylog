@@ -36,7 +36,7 @@ async function call<T>(c: Connection, body: object): Promise<T> {
 }
 
 /** 이 앱이 기대하는 스크립트 버전. 낮으면 새로 복사해 붙여넣으라고 안내한다 */
-export const SCRIPT_VERSION = 4;
+export const SCRIPT_VERSION = 5;
 
 export async function pullSheet(c: Connection) {
   const d = await call<{ version?: number; records: SheetRow[]; settings: SheetSettings; rules?: Rule[] }>(c, { action: "pull" });
@@ -81,4 +81,9 @@ export async function adjustStart(c: Connection, items: { name: string; delta: n
   const { results } = await call<{ results: { ok: boolean; error?: string }[] }>(c, { action: "adjustStart", items }).catch(outdated);
   const failed = results.find((r) => !r.ok);
   if (failed) throw new SheetError(failed.error ?? "시작금액을 바꾸지 못했어요");
+}
+
+/** 계좌 메모 바꾸기 (외화 보유액 저장) */
+export async function setMemo(c: Connection, name: string, memo: string) {
+  return call<{ ok: boolean }>(c, { action: "setMemo", name, memo }).catch(outdated);
 }
