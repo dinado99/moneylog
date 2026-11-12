@@ -49,3 +49,34 @@ describe("외화로 쓴 내역", () => {
     expect([t[1].amount, t[1].currency]).toEqual([9000, undefined]);
   });
 });
+
+import { costRate, fxLedger, holdingsOf } from "./fx";
+
+describe("외화 충전·사용", () => {
+  const recs = [
+    // 우리은행에서 하나머니로 USD 100 충전 (원화 140,000 이동)
+    { date: "2026-11-01", kind: "이동", amount: 140000, outAccount: "우리은행", inAccount: "하나머니", fx: { currency: "USD", amount: 100 } },
+    { date: "2026-11-02", kind: "이동", amount: 72000, outAccount: "우리은행", inAccount: "하나머니", fx: { currency: "USD", amount: 50 } },
+    // 여행 가서 하나머니로 $12.5 지출
+    { date: "2026-11-10", kind: "지출", amount: 17750, outAccount: "하나머니", fx: { currency: "USD", amount: 12.5 } },
+    // 남은 $20를 원화로 다시 바꿈
+    { date: "2026-11-12", kind: "이동", amount: 28000, outAccount: "하나머니", inAccount: "우리은행", fx: { currency: "USD", amount: -20 } },
+  ];
+
+  it("충전은 들어오고, 쓰면 나가고, 되팔면 나간다 (우리은행은 원화라 외화 변동 없음)", () => {
+    const l = fxLedger(recs);
+    expect(holdingsOf("", l.get("하나머니"))).toEqual([{ currency: "USD", amount: 117.5 }]);
+    expect(l.get("우리은행")).toBeUndefined();
+    // 메모의 시작 외화와 합쳐진다
+    expect(holdingsOf("외화 USD 10, JPY 500", l.get("하나머니"))).toEqual([
+      { currency: "USD", amount: 127.5 },
+      { currency: "JPY", amount: 500 },
+    ]);
+  });
+
+  it("평균 충전 환율 = 낸 원화 ÷ 받은 외화", () => {
+    const l = fxLedger(recs);
+    expect(costRate(l.get("하나머니"), "USD")).toBeCloseTo(212000 / 150);
+    expect(costRate(l.get("하나머니"), "JPY")).toBeNull();
+  });
+});

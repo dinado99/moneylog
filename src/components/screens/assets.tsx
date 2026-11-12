@@ -19,7 +19,9 @@ import {
   CURRENCIES,
   currencyInfo,
   formatFx,
+  fxLedger,
   fxOf,
+  holdingsOf,
   toWon,
   useRates,
   withFx,
@@ -82,6 +84,7 @@ export function AssetsScreen() {
       };
     });
     return {
+      ledger: fxLedger(records, today),
       now,
       lastMonthEnd,
       yearStart,
@@ -104,10 +107,11 @@ export function AssetsScreen() {
     a[1][0].kind === b[1][0].kind ? 0 : a[1][0].kind === "자산" ? -1 : 1,
   );
   const hiddenCount = r.now.filter((a) => a.hidden).length;
-  // 외화: 시트 잔고(원화)와 따로 보관. 환산액은 '외화 포함 순자산'에만 더한다
-  const fxAll = r.now
-    .filter((a) => a.kind === "자산")
-    .flatMap((a) => fxOf(a.memo));
+  // 외화 = 메모의 시작 외화 + 외화로 적은 기록(충전 이동 +, 지출 −).
+  // 원화 잔고에는 충전할 때 낸 원화가 이미 들어 있어서 순자산에 따로 더하지 않는다
+  const holdings = (a: AccountBalance) =>
+    holdingsOf(a.memo, r.ledger.get(a.name));
+  const fxAll = r.now.filter((a) => a.kind === "자산").flatMap(holdings);
   const fxWon = toWon(fxAll, fx?.rates);
 
   return (
@@ -139,16 +143,9 @@ export function AssetsScreen() {
       {fxAll.length > 0 && (
         <p className="num px-5 pt-1 text-right text-[12px] text-ink-3">
           외화{" "}
-          {fxWon === null ? "환율 불러오는 중" : `≈ ${formatNumber(fxWon)}원`}
-          {fxWon !== null && (
-            <>
-              {" "}
-              · 외화 포함 순자산{" "}
-              <span className="font-semibold text-ink">
-                {formatNumber(r.nw.net + fxWon)}원
-              </span>
-            </>
-          )}
+          {fxWon === null
+            ? "환율 불러오는 중"
+            : `지금 환율로 ≈ ${formatNumber(fxWon)}원`}
         </p>
       )}
       <div className="px-4 py-3">
@@ -189,7 +186,7 @@ export function AssetsScreen() {
                     <span className="w-16 text-right">연초 대비</span>
                   </div>
                   {list.map((a) => {
-                    const held = fxOf(a.memo);
+                    const held = holdings(a);
                     const memo = withFx(a.memo, []);
                     const heldWon = toWon(held, fx?.rates);
                     return (
@@ -280,6 +277,7 @@ export function AssetsScreen() {
       <Sheet open={!!fxEdit} onClose={() => setFxEdit(null)}>
         {fxEdit && (
           <FxForm
+            held={holdings(fxEdit)}
             account={fxEdit}
             rates={fx?.rates}
             rateDate={fx?.date}
@@ -296,7 +294,9 @@ function FxForm({
   rates,
   rateDate,
   onClose,
+  held,
 }: {
+  held: FxHolding[];
   account: AccountBalance;
   rates?: Record<string, number>;
   rateDate?: string;
@@ -351,9 +351,19 @@ function FxForm({
   return (
     <div className="px-5 pb-5">
       <p className="text-[17px] font-semibold">{account.name} 외화</p>
-      <p className="mt-1 text-[13px] text-ink-3">
-        원화 잔고 {formatNumber(account.balance)}원과 따로, 지금 들고 있는 외화
-        금액을 적어요.
+      {held.length > 0 && (
+        <p className="num mt-2 text-[15px] font-medium">
+          지금{" "}
+          {held
+            .map((h) => `${currencyInfo(h.currency).flag} ${formatFx(h)}`)
+            .join("  ")}
+        </p>
+      )}
+      <p className="mt-1 text-[13px] leading-relaxed text-ink-3">
+        외화 충전(예: 우리은행 → {account.name})은 내역에 &apos;이동&apos;으로,
+        여행 가서 쓴 건 &apos;지출&apos;로 외화를 같이 적으면 여기 외화가 저절로
+        늘고 줄어요. 아래에는 기록 없이 원래 들고 있던 <b>시작 외화</b>만
+        적어요.
       </p>
       <div className="mt-4 space-y-2">
         {rows.map((row, i) => {

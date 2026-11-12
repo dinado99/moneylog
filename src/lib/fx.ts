@@ -149,3 +149,61 @@ export function toWon(list: FxHolding[], rates?: Rates): number | null {
   }
   return Math.round(n);
 }
+
+/**
+ * 기록으로 계산한 계좌별 외화 변동 + 충전한 원가(원화).
+ * - 지출: 출금계좌에서 외화가 나감 (음수 외화 = 환불로 다시 들어옴)
+ * - 수입: 입금계좌로 들어옴
+ * - 이동: 외화 금액이 +면 입금계좌로 들어옴 (예: 우리은행 → 하나머니 USD 충전), −면 출금계좌에서 나감 (원화로 다시 바꿈)
+ * 원가는 외화가 들어온 기록의 원화 금액 합 (평균 충전 환율 = 원가 ÷ 외화)
+ */
+export interface FxLedger {
+  amount: number;
+  /** 들어온 외화 합과 그때 낸 원화 합 (평균 충전 환율 계산용) */
+  boughtFx: number;
+  boughtWon: number;
+}
+
+export function fxLedger(
+  records: { date: string; kind: string; amount: number; inAccount?: string; outAccount?: string; fx?: FxHolding }[],
+  until?: string,
+): Map<string, Map<string, FxLedger>> {
+  const out = new Map<string, Map<string, FxLedger>>();
+  const add = (acc: string | undefined, currency: string, amount: number, won: number) => {
+    if (!acc) return;
+    const byCur = out.get(acc) ?? new Map<string, FxLedger>();
+    const l = byCur.get(currency) ?? { amount: 0, boughtFx: 0, boughtWon: 0 };
+    l.amount += amount;
+    if (amount > 0 && won > 0) {
+      l.boughtFx += amount;
+      l.boughtWon += won;
+    }
+    byCur.set(currency, l);
+    out.set(acc, byCur);
+  };
+  for (const r of records) {
+    if (!r.fx || (until && r.date > until)) continue;
+    const { currency, amount } = r.fx;
+    if (r.kind === "지출") add(r.outAccount, currency, -amount, 0);
+    else if (r.kind === "수입") add(r.inAccount, currency, amount, 0);
+    else if (amount > 0) add(r.inAccount, currency, amount, Math.abs(r.amount));
+    else add(r.outAccount, currency, amount, 0);
+  }
+  return out;
+}
+
+/** 계좌의 지금 외화 = 메모의 시작 외화 + 기록 변동 */
+export function holdingsOf(memo: string, ledger?: Map<string, FxLedger>): FxHolding[] {
+  const map = new Map<string, number>();
+  for (const h of fxOf(memo)) map.set(h.currency, h.amount);
+  for (const [cur, l] of ledger ?? []) map.set(cur, (map.get(cur) ?? 0) + l.amount);
+  return [...map]
+    .map(([currency, amount]) => ({ currency, amount: Math.round(amount * 10000) / 10000 }))
+    .filter((h) => h.amount !== 0);
+}
+
+/** 평균 충전 환율 (충전 기록이 없으면 null) */
+export function costRate(ledger: Map<string, FxLedger> | undefined, currency: string): number | null {
+  const l = ledger?.get(currency);
+  return l && l.boughtFx > 0 ? l.boughtWon / l.boughtFx : null;
+}

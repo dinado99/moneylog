@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { formatNumber, splitEmoji, todayString } from "@/lib/format";
-import { CURRENCIES, useRates } from "@/lib/fx";
+import { CURRENCIES, costRate, fxLedger, useRates } from "@/lib/fx";
+import { useData } from "@/lib/store";
 import type { Kind, RecordDraft, SheetSettings } from "@/lib/types";
 import { Sheet } from "./sheet";
 import { Button, Segmented } from "./ui";
@@ -31,8 +32,18 @@ export function RecordSheet(props: Props) {
   );
 }
 
-function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = "저장" }: Props) {
-  const [d, setD] = useState<RecordDraft>(() => initial ?? { date: todayString(), kind: "지출", content: "", amount: 0 });
+function RecordForm({
+  settings,
+  initial,
+  onClose,
+  onSave,
+  onDelete,
+  saveLabel = "저장",
+}: Props) {
+  const [d, setD] = useState<RecordDraft>(
+    () =>
+      initial ?? { date: todayString(), kind: "지출", content: "", amount: 0 },
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 금액을 지우고 다시 입력할 때도 −를 기억
@@ -42,22 +53,66 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
   const { data: fxData } = useRates();
   const [fxOn, setFxOn] = useState(() => !!initial?.fx);
   const [fxCur, setFxCur] = useState(initial?.fx?.currency ?? "USD");
-  const [fxAmt, setFxAmt] = useState(() => (initial?.fx ? String(Math.abs(initial.fx.amount)) : ""));
-  const [rate, setRate] = useState(() =>
-    initial?.fx && initial.fx.amount ? String(Math.round((Math.abs(initial.amount) / Math.abs(initial.fx.amount)) * 100) / 100) : "",
+  const [fxAmt, setFxAmt] = useState(() =>
+    initial?.fx ? String(Math.abs(initial.fx.amount)) : "",
   );
+  const [rate, setRate] = useState(() =>
+    initial?.fx && initial.fx.amount
+      ? String(
+          Math.round(
+            (Math.abs(initial.amount) / Math.abs(initial.fx.amount)) * 100,
+          ) / 100,
+        )
+      : "",
+  );
+  // 이동: 외화가 입금계좌로 들어감(충전) / 출금계좌에서 나감(원화로 되팔기)
+  const [fxDir, setFxDir] = useState<"in" | "out">(() =>
+    initial?.kind === "이동" && (initial.fx?.amount ?? 0) < 0 ? "out" : "in",
+  );
+  const { records } = useData();
+  const ledger = useMemo(() => fxLedger(records ?? []), [records]);
   const num = (v: string) => Number(v.replace(/,/g, "")) || 0;
+  const round2 = (n: number) => String(Math.round(n * 100) / 100);
+  /** 기본 환율: 외화를 들고 있는 계좌에서 쓰면 그 계좌의 평균 충전 환율, 아니면 오늘 환율 */
+  const defaultRate = (cur: string, p: RecordDraft = d) => {
+    const from =
+      p.kind === "이동"
+        ? fxDir === "out"
+          ? p.outAccount
+          : undefined
+        : p.kind === "지출"
+          ? p.outAccount
+          : undefined;
+    const cost = from ? costRate(ledger.get(from), cur) : null;
+    const rt = cost ?? fxData?.rates[cur];
+    return rt ? round2(rt) : "";
+  };
+  // 외화를 쓴 계좌를 바꾸면 그 계좌의 충전 환율로 다시 계산
+  const setOut = (v?: string) => {
+    set("outAccount", v);
+    if (!fxOn) return;
+    const next = defaultRate(fxCur, { ...d, outAccount: v });
+    if (next && next !== rate) {
+      setRate(next);
+      fromFx(fxAmt, next);
+    }
+  };
   const fromFx = (amt: string, rt: string) => {
     const won = Math.round(num(amt) * num(rt));
-    if (won) set("amount", d.amount < 0 || (d.amount === 0 && minus) ? -won : won);
+    if (won)
+      set("amount", d.amount < 0 || (d.amount === 0 && minus) ? -won : won);
   };
-  const set = <K extends keyof RecordDraft>(k: K, v: RecordDraft[K]) => setD((p) => ({ ...p, [k]: v }));
+  const set = <K extends keyof RecordDraft>(k: K, v: RecordDraft[K]) =>
+    setD((p) => ({ ...p, [k]: v }));
 
   const cats = (settings?.categories ?? []).filter((c) => c.kind === d.kind);
   const current = cats.find((c) => c.name === d.category);
   const needsCategory = d.kind !== "이동" && cats.length > 0;
   // 지출·수입은 음수(차감)도 된다. 이동은 양수만
-  const valid = (d.kind === "이동" ? d.amount > 0 : d.amount !== 0) && /^\d{4}-\d{2}-\d{2}$/.test(d.date) && (!needsCategory || !!d.category);
+  const valid =
+    (d.kind === "이동" ? d.amount > 0 : d.amount !== 0) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(d.date) &&
+    (!needsCategory || !!d.category);
   const negative = d.amount < 0 || (d.amount === 0 && minus);
 
   async function run(action: () => Promise<void>) {
@@ -80,7 +135,9 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
         options={KINDS}
         onChange={(kind) =>
           setD((p) => {
-            const keep = (settings?.categories ?? []).some((c) => c.kind === kind && c.name === p.category);
+            const keep = (settings?.categories ?? []).some(
+              (c) => c.kind === kind && c.name === p.category,
+            );
             if (kind === "이동") setMinus(false);
             return {
               ...p,
@@ -120,11 +177,17 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
             inputMode="numeric"
             autoFocus={!initial}
             placeholder="0"
-            value={d.amount ? `${negative ? "−" : ""}${formatNumber(Math.abs(d.amount))}` : ""}
+            value={
+              d.amount
+                ? `${negative ? "−" : ""}${formatNumber(Math.abs(d.amount))}`
+                : ""
+            }
             onChange={(e) => {
-              const n = Number(e.target.value.replace(/\D/g, "").slice(0, 12)) || 0;
+              const n =
+                Number(e.target.value.replace(/\D/g, "").slice(0, 12)) || 0;
               set("amount", negative ? -n : n);
-              if (fxOn && num(fxAmt)) setRate(String(Math.round((n / num(fxAmt)) * 100) / 100));
+              if (fxOn && num(fxAmt))
+                setRate(String(Math.round((n / num(fxAmt)) * 100) / 100));
             }}
             className={`num w-full bg-transparent text-[30px] font-bold outline-none placeholder:text-line ${negative ? "text-[#1a9a5c]" : ""}`}
           />
@@ -137,7 +200,7 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
             type="button"
             onClick={() => {
               setFxOn(true);
-              if (!rate && fxData?.rates[fxCur]) setRate(String(Math.round(fxData.rates[fxCur] * 100) / 100));
+              if (!rate) setRate(defaultRate(fxCur));
             }}
             className="text-[13px] font-medium text-accent"
           >
@@ -150,9 +213,8 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
                 value={fxCur}
                 onChange={(e) => {
                   setFxCur(e.target.value);
-                  const rt = fxData?.rates[e.target.value];
-                  if (rt) {
-                    const next = String(Math.round(rt * 100) / 100);
+                  const next = defaultRate(e.target.value);
+                  if (next) {
                     setRate(next);
                     fromFx(fxAmt, next);
                   }
@@ -176,10 +238,34 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
                 }}
                 className="num h-10 min-w-0 flex-1 rounded-xl bg-surface px-3 text-right text-[15px] outline-none"
               />
-              <button type="button" aria-label="외화 빼기" onClick={() => setFxOn(false)} className="grid size-8 shrink-0 place-items-center text-[18px] text-ink-3">
+              <button
+                type="button"
+                aria-label="외화 빼기"
+                onClick={() => setFxOn(false)}
+                className="grid size-8 shrink-0 place-items-center text-[18px] text-ink-3"
+              >
                 ×
               </button>
             </div>
+            {d.kind === "이동" && (
+              <div className="mt-2 grid grid-cols-2 gap-1 rounded-xl bg-surface p-1 text-[13px]">
+                {(
+                  [
+                    ["in", "입금계좌로 충전"],
+                    ["out", "출금계좌에서 환전"],
+                  ] as const
+                ).map(([v, label]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setFxDir(v)}
+                    className={`h-8 rounded-lg ${fxDir === v ? "bg-ink text-surface" : "text-ink-2"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
             <label className="mt-2 flex items-center gap-2 text-[13px] text-ink-3">
               <span className="w-24 shrink-0 pl-1">환율 (1{fxCur} =)</span>
               <input
@@ -196,8 +282,16 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
               <span className="w-8 shrink-0">원</span>
             </label>
             <p className="mt-2 text-[12px] leading-relaxed text-ink-3">
-              외화 금액 × 환율로 위 원화가 계산돼요. 카드 결제 원화를 알면 위 금액을 직접 고치세요 (환율이 맞춰져요). 시트에는 원화로 들어가고 내용 뒤에 ({fxCur}{" "}
-              {num(fxAmt) || "금액"})이 붙어요.
+              {d.kind === "이동"
+                ? fxDir === "in"
+                  ? "우리은행 → 하나머니처럼 외화를 충전한 거예요. 지출이 아니라 이동이라 원화는 출금계좌에서 빠지고, 외화는 입금계좌에 쌓여요. "
+                  : "외화를 다시 원화로 바꾼 거예요. 외화는 출금계좌에서 빠지고 원화가 입금계좌로 들어가요. "
+                : d.kind === "지출"
+                  ? "외화를 충전해 둔 계좌에서 쓰면 그 계좌의 평균 충전 환율이 기본으로 들어가요. "
+                  : ""}
+              외화 금액 × 환율로 위 원화가 계산돼요. 실제 원화를 알면 위 금액을
+              직접 고치세요 (환율이 맞춰져요). 시트에는 원화로 들어가고 내용
+              뒤에 ({fxCur} {num(fxAmt) || "금액"})이 붙어요.
             </p>
           </div>
         )}
@@ -228,7 +322,17 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
               {cats.map((c) => {
                 const { emoji, label } = splitEmoji(c.name);
                 return (
-                  <Chip key={c.name} active={d.category === c.name} onClick={() => setD((p) => ({ ...p, category: c.name, subcategory: undefined }))}>
+                  <Chip
+                    key={c.name}
+                    active={d.category === c.name}
+                    onClick={() =>
+                      setD((p) => ({
+                        ...p,
+                        category: c.name,
+                        subcategory: undefined,
+                      }))
+                    }
+                  >
                     {emoji && <span className="mr-1">{emoji}</span>}
                     {label}
                   </Chip>
@@ -236,12 +340,24 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
               })}
             </div>
           ) : (
-            <p className="mt-2 text-[13px] text-ink-3">시트를 연결하면 &apos;가계부 설정&apos;의 분류가 여기에 나와요.</p>
+            <p className="mt-2 text-[13px] text-ink-3">
+              시트를 연결하면 &apos;가계부 설정&apos;의 분류가 여기에 나와요.
+            </p>
           )}
           {current && current.subs.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5 rounded-2xl bg-surface-2 p-2">
               {current.subs.map((s) => (
-                <Chip key={s.name} small active={d.subcategory === s.name} onClick={() => set("subcategory", d.subcategory === s.name ? undefined : s.name)}>
+                <Chip
+                  key={s.name}
+                  small
+                  active={d.subcategory === s.name}
+                  onClick={() =>
+                    set(
+                      "subcategory",
+                      d.subcategory === s.name ? undefined : s.name,
+                    )
+                  }
+                >
                   {s.name}
                 </Chip>
               ))}
@@ -251,32 +367,57 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
       )}
 
       <Field label="날짜">
-        <input type="date" value={d.date} onChange={(e) => set("date", e.target.value)} className="w-full bg-transparent outline-none" />
+        <input
+          type="date"
+          value={d.date}
+          onChange={(e) => set("date", e.target.value)}
+          className="w-full bg-transparent outline-none"
+        />
       </Field>
 
       {d.kind === "이동" ? (
         <div className="grid grid-cols-2 gap-3">
           <Field label="출금계좌">
-            <AccountSelect settings={settings} value={d.outAccount} onChange={(v) => set("outAccount", v)} />
+            <AccountSelect
+              settings={settings}
+              value={d.outAccount}
+              onChange={setOut}
+            />
           </Field>
           <Field label="입금계좌">
-            <AccountSelect settings={settings} value={d.inAccount} onChange={(v) => set("inAccount", v)} />
+            <AccountSelect
+              settings={settings}
+              value={d.inAccount}
+              onChange={(v) => set("inAccount", v)}
+            />
           </Field>
         </div>
       ) : d.kind === "수입" ? (
         <Field label="입금계좌">
-          <AccountSelect settings={settings} value={d.inAccount} onChange={(v) => set("inAccount", v)} />
+          <AccountSelect
+            settings={settings}
+            value={d.inAccount}
+            onChange={(v) => set("inAccount", v)}
+          />
         </Field>
       ) : (
         <Field label={negative ? "돈이 들어온 계좌" : "출금계좌 (결제수단)"}>
-          <AccountSelect settings={settings} value={d.outAccount} onChange={(v) => set("outAccount", v)} />
+          <AccountSelect
+            settings={settings}
+            value={d.outAccount}
+            onChange={setOut}
+          />
         </Field>
       )}
 
       {error && <p className="mt-5 text-[14px] text-danger">{error}</p>}
       <div className="mt-7 flex gap-2">
         {onDelete && (
-          <Button variant="danger" disabled={busy} onClick={() => run(onDelete)}>
+          <Button
+            variant="danger"
+            disabled={busy}
+            onClick={() => run(onDelete)}
+          >
             삭제
           </Button>
         )}
@@ -288,7 +429,17 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
               onSave({
                 ...d,
                 content: d.content.trim(),
-                fx: fxOn && num(fxAmt) ? { currency: fxCur, amount: d.amount < 0 ? -num(fxAmt) : num(fxAmt) } : undefined,
+                fx:
+                  fxOn && num(fxAmt)
+                    ? {
+                        currency: fxCur,
+                        amount: (
+                          d.kind === "이동" ? fxDir === "out" : d.amount < 0
+                        )
+                          ? -num(fxAmt)
+                          : num(fxAmt),
+                      }
+                    : undefined,
                 // 구분에 맞지 않는 계좌는 비운다 (시트와 같은 규칙)
                 inAccount: d.kind === "지출" ? undefined : d.inAccount,
                 outAccount: d.kind === "수입" ? undefined : d.outAccount,
@@ -304,7 +455,15 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
 }
 
 /** 시트 계좌 목록. 같은 이름(현대카드 일시불/할부)은 하나로 보여준다. */
-function AccountSelect({ settings, value, onChange }: { settings?: SheetSettings; value?: string; onChange: (v?: string) => void }) {
+function AccountSelect({
+  settings,
+  value,
+  onChange,
+}: {
+  settings?: SheetSettings;
+  value?: string;
+  onChange: (v?: string) => void;
+}) {
   const groups = new Map<string, string[]>();
   for (const a of settings?.accounts ?? []) {
     if (a.hidden) continue;
@@ -314,7 +473,11 @@ function AccountSelect({ settings, value, onChange }: { settings?: SheetSettings
   }
   const all = [...groups.values()].flat();
   return (
-    <select value={value ?? ""} onChange={(e) => onChange(e.target.value || undefined)} className={`w-full appearance-none bg-transparent outline-none ${value ? "" : "text-ink-3"}`}>
+    <select
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value || undefined)}
+      className={`w-full appearance-none bg-transparent outline-none ${value ? "" : "text-ink-3"}`}
+    >
       <option value="">선택 안 함</option>
       {[...groups].map(([cat, names]) => (
         <optgroup key={cat} label={cat}>
@@ -330,13 +493,27 @@ function AccountSelect({ settings, value, onChange }: { settings?: SheetSettings
   );
 }
 
-function Chip({ active, small, onClick, children }: { active?: boolean; small?: boolean; onClick?: () => void; children: React.ReactNode }) {
+function Chip({
+  active,
+  small,
+  onClick,
+  children,
+}: {
+  active?: boolean;
+  small?: boolean;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={`rounded-full px-3 transition ${small ? "h-7 text-[13px]" : "h-8 text-[14px]"} ${
-        active ? "bg-ink text-surface" : small ? "bg-surface text-ink-2" : "bg-surface-2 text-ink-2"
+        active
+          ? "bg-ink text-surface"
+          : small
+            ? "bg-surface text-ink-2"
+            : "bg-surface-2 text-ink-2"
       }`}
     >
       {children}
@@ -344,11 +521,19 @@ function Chip({ active, small, onClick, children }: { active?: boolean; small?: 
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="mt-5 block">
       <span className="text-[13px] text-ink-3">{label}</span>
-      <div className="mt-1 border-b border-line pb-2 text-[16px] focus-within:border-ink">{children}</div>
+      <div className="mt-1 border-b border-line pb-2 text-[16px] focus-within:border-ink">
+        {children}
+      </div>
     </label>
   );
 }
