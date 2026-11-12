@@ -31,6 +31,7 @@ import {
 import { SheetError } from "@/lib/sheet";
 import { saveImport, useData } from "@/lib/store";
 import type { AssetRow } from "@/lib/import/assets";
+import { useRates } from "@/lib/fx";
 import type { RecordDraft } from "@/lib/types";
 import { RecordRow } from "../record-row";
 import { RecordSheet } from "../record-sheet";
@@ -54,6 +55,7 @@ export function ImportScreen() {
   const router = useRouter();
   const conn = useConnection()!;
   const { records, settings, rules } = useData();
+  const { data: fx } = useRates();
   const [items, setItems] = useState<Item[] | null>(null);
   // 자산 현황 표 + 예전 계좌 찾기 (저장할 내역·기준일이 바뀌면 시작금액을 다시 계산)
   const [assets, setAssets] = useState<{
@@ -123,7 +125,7 @@ export function ImportScreen() {
     withReset: boolean,
   ) {
     if (!settings || !records) return;
-    const oldMap = makeMapper(settings, records, rules);
+    const oldMap = makeMapper(settings, records, rules, fx?.rates);
     let map = oldMap;
     let names = [
       ...new Set(settings.accounts.filter((a) => !a.hidden).map((a) => a.name)),
@@ -149,7 +151,7 @@ export function ImportScreen() {
             : x,
         )
         .filter((x) => x.type !== "계좌" || names.includes(x.category));
-      map = makeMapper(after, records, kept);
+      map = makeMapper(after, records, kept, fx?.rates);
     }
     const existing = new Map<string, number>();
     for (const r of records)
@@ -357,8 +359,9 @@ export function ImportScreen() {
     if (it.edited || it.dup) return [];
     const linked = (raw?: string) =>
       !!raw && newRules.some((x) => x.type === "계좌" && x.source === raw);
-    const { category, account, counter } = it.m.mismatch;
+    const { category, account, counter, fx: fxNote } = it.m.mismatch;
     return [
+      fxNote,
       category,
       linked(it.m.rawAccount)
         ? undefined
@@ -372,7 +375,7 @@ export function ImportScreen() {
   const offCount = items.filter((i) => i.selected && off(i).length).length;
   const shown = onlyOff ? items.filter((i) => off(i).length) : items;
   const needCat = selected.filter(
-    (i) => i.draft.kind !== "이동" && !i.draft.category,
+    (i) => (i.draft.kind !== "이동" && !i.draft.category) || !i.draft.amount,
   ).length;
   const unlinked = Object.keys(choices);
   const resetCount = reset && applyReset ? reset.accounts.length : 0;
@@ -414,7 +417,7 @@ export function ImportScreen() {
         )}
         {needCat > 0 && (
           <p className="text-danger">
-            분류가 필요한 내역 {needCat}건이 있어요. 눌러서 골라 주세요.
+            분류나 원화 금액이 필요한 내역 {needCat}건이 있어요. 눌러서 채워 주세요.
           </p>
         )}
       </div>

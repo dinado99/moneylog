@@ -14,6 +14,11 @@ export interface RecordDraft {
   amount: number;
   inAccount?: string;
   outAccount?: string;
+  /**
+   * 외화로 쓴 것: 통화와 그 통화 금액 (amount는 원화). 시트에는 내용 뒤에 "(USD 12.5)"로 붙여 저장한다.
+   * 환율 = amount / fx.amount
+   */
+  fx?: { currency: string; amount: number };
 }
 
 /** 시트에 있는 한 줄. key로 시트에서 같은 줄을 찾는다. */

@@ -137,3 +137,13 @@ describe("계좌 이름 맞추기", () => {
     expect([n.draft.outAccount, n.guessedAccount]).toEqual(["현대카드", true]);
   });
 });
+
+describe("외화 가져오기", () => {
+  it("오늘 환율로 원화를 계산하고 외화 금액을 남긴다", () => {
+    const row = parseTable(parseDelimited("날짜\t시간\t타입\t대분류\t소분류\t내용\t금액\t화폐\t결제수단\t메모\n2026-11-12\t12:00\t지출\t식비\t외식비\t점심\t-12.5\tUSD\t현대카드\t"))!.rows[0];
+    const m = makeMapper(settings, [], [], { USD: 1400 })(row);
+    expect([m.draft.amount, m.draft.fx]).toEqual([17500, { currency: "USD", amount: 12.5 }]);
+    expect(m.mismatch.fx).toContain("오늘 환율");
+    expect(makeMapper(settings, [], [])(row).draft.amount).toBe(0);
+  });
+});

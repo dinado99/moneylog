@@ -102,13 +102,19 @@ export interface Mapped {
    * 뱅크샐러드 값이 시트 '가계부 설정'과 그대로 맞지 않은 것 (확인 화면에서 빨간색).
    * 내가 만든 규칙으로 맞춘 건 맞는 걸로 본다.
    */
-  mismatch: { category?: string; account?: string; counter?: string };
+  mismatch: { category?: string; account?: string; counter?: string; fx?: string };
   /** 원래 결제수단 이름 (계좌 규칙 저장용) */
   rawAccount?: string;
   raw: BankRow;
 }
 
-export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rules: Rule[]) {
+export function makeMapper(
+  settings: SheetSettings,
+  history: MoneyRecord[],
+  rules: Rule[],
+  /** 통화 1단위가 몇 원인지 (외화 내역 원화 계산용) */
+  rates?: Record<string, number>,
+) {
   const accounts = [...new Set(settings.accounts.filter((a) => !a.hidden).map((a) => a.name))];
   const cats = (kind: Kind) => settings.categories.filter((c) => c.kind === kind);
   const merchantRules = rules.filter((r) => r.type === "가맹점").sort((a, b) => b.source.length - a.source.length);
@@ -253,13 +259,16 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
     // 이체가 들어온 것(+)이면 결제수단이 입금계좌, 내용(상대 계좌)이 출금계좌
     const acc = account(row.method, false);
     const other = kind === "이동" ? account(content, false) : undefined;
+    // 외화: 금액은 그 통화 금액 → 원화는 오늘 환율로 계산해 두고 확인 화면에서 실제 결제 원화로 고치게 한다
+    const rate = row.currency ? rates?.[row.currency] : undefined;
     const draft: RecordDraft = {
       date: row.date,
       kind,
       category: cat?.category,
       subcategory: cat?.subcategory,
       content,
-      amount: row.amount,
+      amount: row.currency ? (rate ? Math.round(row.amount * rate) : 0) : row.amount,
+      ...(row.currency ? { fx: { currency: row.currency, amount: row.amount } } : {}),
       inAccount: kind === "수입" ? acc : kind === "이동" ? (row.incoming ? acc : other) : undefined,
       outAccount: kind === "수입" ? undefined : kind === "이동" ? (row.incoming ? other : acc) : acc,
     };
@@ -268,6 +277,11 @@ export function makeMapper(settings: SheetSettings, history: MoneyRecord[], rule
       mismatch.category = row.category ? `분류 '${[row.category, row.subcategory].filter(Boolean).join(" › ")}' 시트에 없음` : "뱅크샐러드 분류 없음";
     }
     if (row.method && !sureAccount(row.method)) mismatch.account = `결제수단 '${row.method}' 시트에 없음`;
+    if (row.currency) {
+      mismatch.fx = rate
+        ? `외화 ${row.currency} ${row.amount} → 오늘 환율 ${Math.round(rate * 100) / 100}원으로 계산했어요. 실제 결제 원화로 고쳐 주세요`
+        : `외화 ${row.currency} ${row.amount} → 환율을 몰라서 원화를 직접 넣어 주세요`;
+    }
     if (kind === "이동" && content && !sureAccount(content)) mismatch.counter = `${row.incoming ? "보낸" : "받는"} 계좌 '${content}' 시트에 없음`;
     return {
       draft,

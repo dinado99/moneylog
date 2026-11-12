@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { formatNumber, splitEmoji, todayString } from "@/lib/format";
+import { CURRENCIES, useRates } from "@/lib/fx";
 import type { Kind, RecordDraft, SheetSettings } from "@/lib/types";
 import { Sheet } from "./sheet";
 import { Button, Segmented } from "./ui";
@@ -37,6 +38,19 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
   // 금액을 지우고 다시 입력할 때도 −를 기억
   const [minus, setMinus] = useState(() => (initial?.amount ?? 0) < 0);
   const amountRef = useRef<HTMLInputElement>(null);
+  // 외화: 외화 금액 × 환율 = 원화. 원화를 직접 고치면 환율이 바뀐다
+  const { data: fxData } = useRates();
+  const [fxOn, setFxOn] = useState(() => !!initial?.fx);
+  const [fxCur, setFxCur] = useState(initial?.fx?.currency ?? "USD");
+  const [fxAmt, setFxAmt] = useState(() => (initial?.fx ? String(Math.abs(initial.fx.amount)) : ""));
+  const [rate, setRate] = useState(() =>
+    initial?.fx && initial.fx.amount ? String(Math.round((Math.abs(initial.amount) / Math.abs(initial.fx.amount)) * 100) / 100) : "",
+  );
+  const num = (v: string) => Number(v.replace(/,/g, "")) || 0;
+  const fromFx = (amt: string, rt: string) => {
+    const won = Math.round(num(amt) * num(rt));
+    if (won) set("amount", d.amount < 0 || (d.amount === 0 && minus) ? -won : won);
+  };
   const set = <K extends keyof RecordDraft>(k: K, v: RecordDraft[K]) => setD((p) => ({ ...p, [k]: v }));
 
   const cats = (settings?.categories ?? []).filter((c) => c.kind === d.kind);
@@ -110,12 +124,85 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
             onChange={(e) => {
               const n = Number(e.target.value.replace(/\D/g, "").slice(0, 12)) || 0;
               set("amount", negative ? -n : n);
+              if (fxOn && num(fxAmt)) setRate(String(Math.round((n / num(fxAmt)) * 100) / 100));
             }}
             className={`num w-full bg-transparent text-[30px] font-bold outline-none placeholder:text-line ${negative ? "text-[#1a9a5c]" : ""}`}
           />
           <span className="text-[20px] font-semibold text-ink-2">원</span>
         </div>
       </label>
+      <div className="mt-2">
+        {!fxOn ? (
+          <button
+            type="button"
+            onClick={() => {
+              setFxOn(true);
+              if (!rate && fxData?.rates[fxCur]) setRate(String(Math.round(fxData.rates[fxCur] * 100) / 100));
+            }}
+            className="text-[13px] font-medium text-accent"
+          >
+            ＋ 외화로 썼어요
+          </button>
+        ) : (
+          <div className="rounded-2xl bg-surface-2 p-3">
+            <div className="flex items-center gap-2">
+              <select
+                value={fxCur}
+                onChange={(e) => {
+                  setFxCur(e.target.value);
+                  const rt = fxData?.rates[e.target.value];
+                  if (rt) {
+                    const next = String(Math.round(rt * 100) / 100);
+                    setRate(next);
+                    fromFx(fxAmt, next);
+                  }
+                }}
+                className="h-10 w-24 shrink-0 rounded-xl bg-surface px-2 text-[14px] outline-none"
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.flag} {c.code}
+                  </option>
+                ))}
+              </select>
+              <input
+                inputMode="decimal"
+                placeholder="외화 금액"
+                value={fxAmt}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^\d.,]/g, "");
+                  setFxAmt(v);
+                  fromFx(v, rate);
+                }}
+                className="num h-10 min-w-0 flex-1 rounded-xl bg-surface px-3 text-right text-[15px] outline-none"
+              />
+              <button type="button" aria-label="외화 빼기" onClick={() => setFxOn(false)} className="grid size-8 shrink-0 place-items-center text-[18px] text-ink-3">
+                ×
+              </button>
+            </div>
+            <label className="mt-2 flex items-center gap-2 text-[13px] text-ink-3">
+              <span className="w-24 shrink-0 pl-1">환율 (1{fxCur} =)</span>
+              <input
+                inputMode="decimal"
+                placeholder="0"
+                value={rate}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^\d.,]/g, "");
+                  setRate(v);
+                  fromFx(fxAmt, v);
+                }}
+                className="num h-10 min-w-0 flex-1 rounded-xl bg-surface px-3 text-right text-[15px] text-ink outline-none"
+              />
+              <span className="w-8 shrink-0">원</span>
+            </label>
+            <p className="mt-2 text-[12px] leading-relaxed text-ink-3">
+              외화 금액 × 환율로 위 원화가 계산돼요. 카드 결제 원화를 알면 위 금액을 직접 고치세요 (환율이 맞춰져요). 시트에는 원화로 들어가고 내용 뒤에 ({fxCur}{" "}
+              {num(fxAmt) || "금액"})이 붙어요.
+            </p>
+          </div>
+        )}
+      </div>
+
       {negative && d.kind !== "이동" && (
         <p className="mt-2 text-[12px] leading-relaxed text-ink-3">
           {d.kind === "지출"
@@ -201,6 +288,7 @@ function RecordForm({ settings, initial, onClose, onSave, onDelete, saveLabel = 
               onSave({
                 ...d,
                 content: d.content.trim(),
+                fx: fxOn && num(fxAmt) ? { currency: fxCur, amount: d.amount < 0 ? -num(fxAmt) : num(fxAmt) } : undefined,
                 // 구분에 맞지 않는 계좌는 비운다 (시트와 같은 규칙)
                 inAccount: d.kind === "지출" ? undefined : d.inAccount,
                 outAccount: d.kind === "수입" ? undefined : d.outAccount,

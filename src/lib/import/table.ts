@@ -18,6 +18,8 @@ export interface BankRow {
   subcategory?: string;
   method?: string;
   memo?: string;
+  /** 원화가 아닌 통화 코드 (뱅크샐러드 '화폐'가 USD 등). 이때 amount는 그 통화 금액 (소수 그대로) */
+  currency?: string;
 }
 
 type TxnDraft = BankRow;
@@ -35,7 +37,8 @@ type Field =
   | "withdraw"
   | "deposit"
   | "method"
-  | "memo";
+  | "memo"
+  | "currency";
 
 // 앞에 있을수록 우선. 뱅크샐러드 내보내기 + 일반 카드/은행 내역 헤더를 커버한다.
 const HEADER_KEYWORDS: Record<Field, string[]> = {
@@ -45,6 +48,7 @@ const HEADER_KEYWORDS: Record<Field, string[]> = {
   category: ["대분류", "카테고리", "분류", "category"],
   subcategory: ["소분류"],
   merchant: ["내용", "가맹점명", "가맹점", "이용가맹점", "사용처", "거래내용", "적요", "상호", "거래처", "merchant", "description"],
+  currency: ["화폐", "통화", "currency"],
   amount: ["금액", "이용금액", "결제금액", "승인금액", "거래금액", "amount"],
   withdraw: ["출금액", "출금금액", "출금", "찾으신금액", "지출금액"],
   deposit: ["입금액", "입금금액", "입금", "맡기신금액", "수입금액"],
@@ -211,7 +215,9 @@ export function parseTable(table: Cell[][], fallbackYear = new Date().getFullYea
 
     // 타입 칸이 있고 금액에 부호가 있으면(뱅크샐러드): 지출은 −가 정상, +면 돌려받은 돈 → 지출 차감(음수)
     let incoming: boolean | undefined;
-    amount = Math.round(amount);
+    const cur = str(get(row, "currency")).toUpperCase();
+    const currency = /^[A-Z]{3}$/.test(cur) && cur !== "KRW" ? cur : undefined;
+    amount = currency ? Math.round(amount * 100) / 100 : Math.round(amount);
     if (explicit && signed) {
       if (type === "expense") amount = -amount;
       else if (type === "transfer") {
@@ -238,6 +244,7 @@ export function parseTable(table: Cell[][], fallbackYear = new Date().getFullYea
       subcategory: subcategory && subcategory !== "미분류" ? subcategory : undefined,
       method: str(get(row, "method")) || undefined,
       memo: memo !== merchant ? memo : undefined,
+      currency,
     });
   }
   return { rows, skipped };
