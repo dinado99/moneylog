@@ -1,6 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ChevronRight } from "lucide-react";
+import { setRecordFilter } from "@/lib/record-filter";
 import {
   balances,
   monthEnd,
@@ -57,6 +60,7 @@ export function AssetsScreen() {
   const { records, settings } = useData();
   const [view, setView] = useState<"list" | "trend">("list");
   const [showHidden, setShowHidden] = useState(false);
+  const router = useRouter();
   const [fxEdit, setFxEdit] = useState<AccountBalance | null>(null);
   const { data: fx } = useRates();
 
@@ -179,6 +183,16 @@ export function AssetsScreen() {
                     >
                       {formatNumber(sum)}원
                     </span>
+                    <button
+                      onClick={() => {
+                        setRecordFilter({ category: cat });
+                        router.push("/");
+                      }}
+                      className="flex h-7 items-center rounded-full bg-surface-2 pr-1.5 pl-2.5 text-[12px] text-ink-2"
+                    >
+                      내역
+                      <ChevronRight size={14} />
+                    </button>
                   </div>
                   <div className="flex px-5 pb-1 text-[11px] text-ink-3">
                     <span className="flex-1">계좌</span>
@@ -303,6 +317,7 @@ function FxForm({
   onClose: () => void;
 }) {
   const conn = useConnection();
+  const router = useRouter();
   const [rows, setRows] = useState<{ currency: string; amount: string }[]>(
     () => {
       const held = fxOf(account.memo);
@@ -350,7 +365,24 @@ function FxForm({
 
   return (
     <div className="px-5 pb-5">
-      <p className="text-[17px] font-semibold">{account.name} 외화</p>
+      <div className="flex items-center gap-2">
+        <p className="flex-1 text-[17px] font-semibold">{account.name}</p>
+        <button
+          onClick={() => {
+            setRecordFilter({
+              category: account.category,
+              account: account.name,
+            });
+            onClose();
+            router.push("/");
+          }}
+          className="flex h-8 items-center rounded-full bg-accent-soft pr-2 pl-3 text-[13px] font-semibold text-accent"
+        >
+          이 계좌 내역 보기
+          <ChevronRight size={15} />
+        </button>
+      </div>
+      <p className="mt-4 text-[15px] font-semibold">외화</p>
       {held.length > 0 && (
         <p className="num mt-2 text-[15px] font-medium">
           지금{" "}
