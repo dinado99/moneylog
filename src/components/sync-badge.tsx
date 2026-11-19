@@ -17,3 +17,15 @@ export function SyncBadge() {
     </button>
   );
 }
+
+/** 시트 연결이 실패하면 이유를 화면 위에 보여 준다 (예전에 받아 둔 내용은 보이지만 저장은 안 되는 상태) */
+export function SyncError() {
+  const { isValidating, error, data } = useSheet();
+  if (!error || isValidating || !data) return null;
+  return (
+    <p className="mx-4 mb-3 rounded-2xl bg-danger/10 px-4 py-3 text-[13px] leading-relaxed text-danger">
+      시트에 연결하지 못했어요: {error instanceof Error ? error.message : String(error)}
+      <span className="block text-danger/80">지금 보이는 건 예전에 받아 둔 내용이라 저장도 안 될 수 있어요.</span>
+    </p>
+  );
+}

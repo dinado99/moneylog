@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { formatNumber, splitEmoji, todayString } from "@/lib/format";
 import { CURRENCIES, costRate, fxLedger, useRates } from "@/lib/fx";
+import { SheetError } from "@/lib/sheet";
 import { useData } from "@/lib/store";
 import type { Kind, RecordDraft, SheetSettings } from "@/lib/types";
 import { Sheet } from "./sheet";
@@ -121,8 +122,10 @@ function RecordForm({
     try {
       await action();
       onClose();
-    } catch {
-      setError("저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
+    } catch (e) {
+      console.error(e);
+      // 시트가 알려 준 이유(비밀번호 틀림, 스크립트 예전 버전, 칸이 꽉 참 등)를 그대로 보여 준다
+      setError(e instanceof SheetError ? e.message : `저장하지 못했어요. 잠시 후 다시 시도해 주세요. (${e instanceof Error ? e.message : String(e)})`);
     } finally {
       setBusy(false);
     }

@@ -25,7 +25,7 @@ import { useMonth } from "../app-shell";
 import { MonthSwitcher } from "../month-switcher";
 import { RecordRow } from "../record-row";
 import { RecordSheet } from "../record-sheet";
-import { SyncBadge } from "../sync-badge";
+import { SyncBadge, SyncError } from "../sync-badge";
 import { LoadError, PageHeader } from "../ui";
 
 export function RecordsScreen() {
@@ -100,6 +100,7 @@ export function RecordsScreen() {
           </div>
         }
       />
+      <SyncError />
       {error && !records ? (
         <LoadError />
       ) : (

@@ -33,7 +33,7 @@ import {
 import { SheetError } from "@/lib/sheet";
 import { saveMemo, useData } from "@/lib/store";
 import { Sheet } from "../sheet";
-import { SyncBadge } from "../sync-badge";
+import { SyncBadge, SyncError } from "../sync-badge";
 import { Button, Card, PageHeader, Segmented } from "../ui";
 
 function Change({
@@ -121,6 +121,7 @@ export function AssetsScreen() {
   return (
     <>
       <PageHeader title="자산" right={<SyncBadge />} />
+      <SyncError />
       <div className="mx-4 grid grid-cols-3 rounded-3xl bg-surface py-4 text-center">
         <div>
           <p className="text-[12px] text-ink-3">자산</p>
